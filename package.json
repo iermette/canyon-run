@@ -1,0 +1,22 @@
+{
+  "name": "canyon-run-driving",
+  "version": "1.0.0",
+  "description": "Simple top-down 2D driving game (HTML Canvas + vanilla JS modules, zero dependencies, multiplayer over WebSocket)",
+  "license": "MIT",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "./launch.sh",
+    "stop": "./launch.sh stop",
+    "test": "node tests/stress.mjs && node tests/drive.mjs && node tests/multiplayer.mjs"
+  },
+  "keywords": [
+    "game",
+    "canvas",
+    "2d",
+    "driving",
+    "multiplayer",
+    "websocket",
+    "procedural-generation",
+    "no-dependencies"
+  ]
+}

@@ -1,0 +1,15 @@
+# Local server runtime
+.server.log
+.server.pid
+
+# Editor / agent scratch dirs
+.playwright-mcp/
+.cortexkit/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
