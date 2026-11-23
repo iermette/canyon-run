@@ -1,24 +1,46 @@
-# Canyon Run — top-down 2D driving game
+# 🏁 Canyon Run
 
-A simple playable top-down driving prototype built with **HTML Canvas + vanilla
-JavaScript ES modules**. No engine, no dependencies: flat rectangles/circles for
-graphics and arcade-style movement.
+**A top-down 2D driving game — vanilla JavaScript, zero dependencies, up to 15 players.**
 
-Drive from the start line to the checkered finish through three distinct
-sections — an **open** stretch, a dark narrow **tunnel**, and a **bridge** over
-water — while avoiding cones, barrels, rocks and barriers. Hitting any obstacle
-resets you to the start; driving off the road just slows you down.
+[![MIT License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![No dependencies](https://img.shields.io/badge/dependencies-zero-brightgreen)](package.json)
+[![Node](https://img.shields.io/badge/node-%E2%89%A5%2018-339933)](server.js)
+[![JavaScript](https://img.shields.io/badge/JS-vanilla%20ES%20modules-f7df1e?logo=javascript&logoColor=000)](src/)
 
-Every track is **procedurally generated**: a seeded random walk with bounded
-curvature (always drivable) and no self-crossings. The tunnel/bridge sections
-land at random positions along it, and obstacles/trees are scattered per seed.
-Press `N` for a new track, `C` to go back to the original hand-crafted one.
+![Race through the canyon](docs/screens/race.png)
 
-Before each race you pick your vehicle in the **garage** (12 vehicles with
-different speed/acceleration/grip), then a checkered-flag countdown starts the
-race. The game is also **multiplayer**: up to 15 players share one room over
-WebSocket, the server runs the synced start for everyone, and the road widens
-as more players join.
+Drive from the start line to the checkered finish through three distinct sections —
+an **open** stretch, a dark narrow **tunnel**, and a **bridge** over water — while
+avoiding cones, barrels, rocks and barriers. Touch an obstacle and you're back to
+the start; leave the road and you bog down in grass or splash into water.
+
+## Features
+
+- 🎲 **Procedural tracks** — every race a new random road, generated from a seed
+  with bounded curvature (always drivable) and no self-crossings. Press `N` for a
+  new track, `C` for the original hand-crafted one.
+- 🚗 **12 vehicles** in the garage — sports car, taxi, police car, ambulance,
+  fire truck, cement mixer, dump truck, flatbed, bus, tank… each with its own
+  speed / acceleration / grip.
+- 👥 **Multiplayer, up to 15 players** — one shared room over WebSocket, a
+  synchronized countdown, live position relay with client-side interpolation,
+  and a road that widens as more cars join.
+- 🕹️ **No engine, no framework, no assets** — flat shapes drawn on an HTML
+  Canvas, arcade physics, a hand-rolled RFC 6455 WebSocket server. `npm install`
+  is literally a no-op.
+- ✅ **Tested** — regression suite with a virtual driver: 300 generated seeds are
+  validated drivable, AI-run tracks must finish with no crashes, and multiplayer
+  end-to-end tests cover the lobby → countdown → race → lobby flow.
+
+## The garage & the lobby
+
+Pick your ride before every race. In multiplayer the garage doubles as the lobby:
+each player picks a vehicle, readies up, and one `ENTER` starts a shared
+checkered-flag countdown for everyone.
+
+![Garage — choose your vehicle](docs/screens/garage.png)
+
+![Multiplayer lobby — everyone ready](docs/screens/lobby.png)
 
 ## Run it
 
@@ -45,8 +67,8 @@ same port. To play with friends:
 2. Share your address: `http://localhost:8080` works for you; players on the
    same network use your LAN IP, e.g. `http://192.168.1.42:8080`
    (the server prints it at startup). The garage screen shows the exact URL
-to share.
-3. Everyone lands in a **lobby** with their name and vehicle choice. Press
+   to share.
+3. Everyone lands in the garage (lobby) with their name and vehicle choice. Press
    `ENTER` to ready up, then `ENTER` again to start — the server runs one
    shared 5-second checkered countdown for all connected players (the sync
    point), places everyone on a starting grid behind the line, and lights it
@@ -85,13 +107,20 @@ In the **garage**: arrows/WASD move the selection, `R` picks a random vehicle,
   instant crash.
 - The tunnel is narrow — one side is blocked by a rock, use the other half.
 
+## Tests
+
+```bash
+npm test   # track stress (300 seeds) + virtual driver (40 tracks) + multiplayer e2e
+```
+
 ## Project structure
 
 ```
 index.html      Canvas + page shell, loads src/main.js as an ES module
 server.js       Zero-dependency Node server: static files + the multiplayer room
                 (prints your LAN IP to share with other players)
-package.json    Only defines "dev": "node server.js" — no dependencies
+package.json    Only scripts — no dependencies
+docs/screens/   Screenshots used in this README
 src/
   main.js       Entry point: canvas setup, the requestAnimationFrame game loop,
                 wires world + car + camera + input + gameState together
@@ -111,27 +140,29 @@ src/
   camera.js     Viewport logic: smooth follow with look-ahead in the direction
                 of travel, keeps the car centered; world->screen transform.
   collision.js  Car (circle) vs obstacles (circles + oriented box for the
-                barrier), plus the off-track check.
-   gameState.js  Game states (countdown / playing / crashed / finished), timer,
-                 win condition at the finish line, crash -> reset-to-start flow,
-                 the checkered-flag countdown panel and the on-screen HUD.
-   garage.js     Pre-race vehicle selection overlay; in multiplayer it doubles
-                 as the lobby (player list, shareable URL, ready/start).
-   vehicles.js   The 12-vehicle catalog: per-vehicle physics stats + top-down
-                 canvas sprites (sports car, taxi, police, ambulance, fire
-                 truck, cement mixer, dump truck, flatbed, bus, tank...).
-   net.js        Thin WebSocket client for the room; falls back to solo when
-                 no server is reachable.
-   remotes.js    Other players' cars: snapshot buffer + interpolation ~120 ms
-                 behind real time, name tags, staleness handling.
-   utils.js      Small shared math helpers (clamp/lerp, closest point on
-                 segment, circle & oriented-box collision, rounded rect path).
+                barrier), plus the off-track check and water-contact detection.
+  gameState.js  Game states (countdown / playing / crashed / finished), timer,
+                win condition at the finish line, crash -> reset-to-start flow,
+                the checkered-flag countdown panel and the on-screen HUD.
+  garage.js     Pre-race vehicle selection overlay; in multiplayer it doubles
+                as the lobby (player list, shareable URL, ready/start).
+  vehicles.js   The 12-vehicle catalog: per-vehicle physics stats + top-down
+                canvas sprites (sports car, taxi, police, ambulance, fire
+                truck, cement mixer, dump truck, flatbed, bus, tank...).
+  net.js        Thin WebSocket client for the room; falls back to solo when
+                no server is reachable.
+  remotes.js    Other players' cars: snapshot buffer + interpolation ~120 ms
+                behind real time, name tags, staleness handling.
+  effects.js    Splash particles (water contact) and crash FX.
+  utils.js      Small shared math helpers (clamp/lerp, closest point on
+                segment, circle & oriented-box collision, rounded rect path).
 server/
   wsserver.js   Minimal RFC 6455 WebSocket server (zero dependencies):
                 text frames, ping/pong, close handshake.
   room.js       The game room: lobby -> synced countdown -> race -> lobby.
                 Authoritative for the round flow; relays position snapshots;
                 scales road width with player count.
+tests/          Regression suite: track stress, virtual driver, multiplayer e2e.
 ```
 
 ### How a frame flows
@@ -158,6 +189,11 @@ server/
    time so motion stays smooth.
 4. Finishing (or leaving) is broadcast; when no racers remain, the room resets
    to the lobby with a fresh seed for the next round.
+
+## Contributing
+
+Issues and pull requests are welcome — see the structure above to find the
+right module, and run `npm test` before submitting.
 
 ## License
 
