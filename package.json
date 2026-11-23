@@ -3,6 +3,14 @@
   "version": "1.0.0",
   "description": "Simple top-down 2D driving game (HTML Canvas + vanilla JS modules, zero dependencies, multiplayer over WebSocket)",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iermette/canyon-run.git"
+  },
+  "homepage": "https://github.com/iermette/canyon-run#readme",
+  "bugs": {
+    "url": "https://github.com/iermette/canyon-run/issues"
+  },
   "scripts": {
     "dev": "node server.js",
     "start": "./launch.sh",

@@ -158,3 +158,7 @@ server/
    time so motion stays smooth.
 4. Finishing (or leaving) is broadcast; when no racers remain, the room resets
    to the lobby with a fresh seed for the next round.
+
+## License
+
+Released under the [MIT License](LICENSE) — free to use, modify and redistribute.
