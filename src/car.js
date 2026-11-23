@@ -1,5 +1,7 @@
 import { clamp } from './utils.js';
 import { VEHICLES } from './vehicles.js';
+import { TURBO_MAX_MULT, TURBO_ACCEL_MULT } from './turbo.js';
+import { KNOCK_TAU } from './bump.js';
 
 const DRAG = 1.4;           // proportional drag, per second
 const ROLL_FRICTION = 70;   // rolling resistance with no input, units/s^2
@@ -23,26 +25,47 @@ export class Car {
     this.angle = start.angle; // heading, radians (0 = +x)
     this.speed = 0;
     this.sinking = 0; // 0..1, set by the splash reset (the car slips under)
+    this.knockX = 0;  // shove from a car bump (see bump.js), decays in update
+    this.knockY = 0;
   }
 
   get dirX() { return Math.cos(this.angle); }
   get dirY() { return Math.sin(this.angle); }
 
+  // A rear-end shove (relayed 'push'): transient velocity along the collision
+  // vector, added to the position integration and decaying exponentially.
+  applyKnock(dirX, dirY, v) {
+    this.knockX += dirX * v;
+    this.knockY += dirY * v;
+  }
+
   update(dt, drive) {
     const s = this.vehicle.stats;
-    if (drive.throttle > 0) this.speed += s.accel * dt;
+    const turbo = !!drive.turbo; // catching a car ahead (see turbo.js)
+    if (drive.throttle > 0) this.speed += s.accel * (turbo ? TURBO_ACCEL_MULT : 1) * dt;
     else if (drive.throttle < 0) this.speed -= s.brake * dt;
     else this.speed -= Math.sign(this.speed) * Math.min(Math.abs(this.speed), ROLL_FRICTION * dt);
 
     this.speed -= this.speed * DRAG * dt; // drag always opposes motion
-    this.speed = clamp(this.speed, s.reverseMax, s.maxSpeed);
+
+    const cap = turbo ? s.maxSpeed * TURBO_MAX_MULT : s.maxSpeed;
+    if (this.speed > cap) {
+      // Turbo cut-off (or off-road overshoot): ease back to the ceiling,
+      // no hard jump down when the boost ends.
+      this.speed += (cap - this.speed) * Math.min(1, 3 * dt);
+    } else {
+      this.speed = clamp(this.speed, s.reverseMax, cap);
+    }
 
     // Steering only bites at speed and inverts while reversing.
     const grip = clamp(Math.abs(this.speed) / GRIP_SPEED, 0, 1) * (this.speed < 0 ? -1 : 1);
     this.angle += drive.steer * s.turnRate * grip * dt;
 
-    this.x += this.dirX * this.speed * dt;
-    this.y += this.dirY * this.speed * dt;
+    const decay = Math.exp(-dt / KNOCK_TAU); // the shove fades out quickly
+    this.knockX *= decay;
+    this.knockY *= decay;
+    this.x += (this.dirX * this.speed + this.knockX) * dt;
+    this.y += (this.dirY * this.speed + this.knockY) * dt;
   }
 
   // Heavy slowdown when off the road surface (grass, water, tunnel walls).

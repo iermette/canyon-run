@@ -96,13 +96,13 @@ export class GameState {
     }
   }
 
-  drawHUD(ctx, w, h, sectionName, offTrack, trackLabel, vehicleLabel, posLabel, inDrink = false) {
+  drawHUD(ctx, w, h, sectionName, offTrack, trackLabel, vehicleLabel, posLabel, inDrink = false, turboState = null) {
     ctx.save();
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
     const lines = [
       'Controls: W/Up gas - S/Down brake/reverse',
-      'A/D or Left/Right to steer  ·  N new track / C classic / G garage',
+      'A/D or Left/Right to steer - Space turbo  ·  N new track / C classic / G garage',
       `TIME ${this.time.toFixed(1)}s   SECTION ${sectionName}${trackLabel ? `   TRACK ${trackLabel}` : ''}${vehicleLabel ? `   VEHICLE ${vehicleLabel}` : ''}${posLabel ? `   ${posLabel}` : ''}`, 
     ];
     // warnings get their own colour (the drink one outranks plain off-track)
@@ -114,6 +114,14 @@ export class GameState {
       } else if (offTrack) {
         lines.push('OFF TRACK! You are slowing down');
         colors.push('#ffd23e');
+      }
+      // turbo hint only when a racer is ahead to chase
+      if (turboState === 'on') {
+        lines.push('TURBO ON! Faster until your nose is level with the car ahead');
+        colors.push('#ffb14e');
+      } else if (turboState === 'ready') {
+        lines.push('TURBO READY - hold Space to catch the car ahead');
+        colors.push('#8fa3bf');
       }
     }
 

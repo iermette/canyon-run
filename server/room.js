@@ -96,6 +96,16 @@ class Room {
         }
         break;
 
+      case 'push': { // a racer rear-ended someone — relay the shove to the victim only
+        if (this.phase !== 'racing' || !this.racingIds.has(p.id)) return;
+        const q = this.players.get(msg.id);
+        if (!q || q === p) return; // unknown peer, or pushing myself
+        const dx = Number(msg.dx) || 0, dy = Number(msg.dy) || 0;
+        const v = Math.min(Math.max(Number(msg.v) || 0, 0), 500); // sane impulse bound
+        q.ws.send(JSON.stringify({ t: 'push', dx, dy, v }));
+        break;
+      }
+
       case 'finish':
         if (!this.racingIds.delete(p.id)) return;
         this.broadcast({ t: 'finished', id: p.id, time: Number(msg.time) || 0 });

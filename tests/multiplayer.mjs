@@ -102,6 +102,16 @@ check(gotB.x === 12.5 && gotB.s === 90, `snapshot relayed to Bob (x=${gotB.x}, s
 await C.next((m) => m.t === 'snap' && m.id === A.id);
 check(true, 'snapshot relayed to Carol too');
 
+// ---- rear-end push relay -----------------------------------------------------------
+A.send({ t: 'push', id: B.id, dx: 0.98, dy: 0.17, v: 180 });
+const gotPush = await B.next((m) => m.t === 'push');
+check(gotPush.dx === 0.98 && gotPush.dy === 0.17 && gotPush.v === 180, `push relayed to the victim only (v=${gotPush.v})`);
+await new Promise((r) => setTimeout(r, 150)); // the pusher must not get a push back
+check(!A.msgs.some((m) => m.t === 'push') && !C.msgs.some((m) => m.t === 'push'), 'push reaches only the hit player');
+A.send({ t: 'push', id: B.id, dx: 1, dy: 0, v: 1e9 });
+const gotClamped = await B.next((m) => m.t === 'push');
+check(gotClamped.v === 500, `absurd push velocity clamped by the server (v=${gotClamped.v})`);
+
 // ---- finishes -> back to lobby ---------------------------------------------------
 A.send({ t: 'finish', time: 42.5 });
 const finB = await B.next((m) => m.t === 'finished' && m.id === A.id);

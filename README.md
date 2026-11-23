@@ -25,6 +25,16 @@ the start; leave the road and you bog down in grass or splash into water.
 - 👥 **Multiplayer, up to 15 players** — one shared room over WebSocket, a
   synchronized countdown, live position relay with client-side interpolation,
   and a road that widens as more cars join.
+- 🔥 **Turbo catch-up** — hold `Space` while a racer is ahead of you and you
+  go a little faster (top speed +15%, launch +25%) until your nose is level
+  with theirs, then the boost eases off.
+- 💥 **Rear-end shoves** — running into another racer's tail pushes them along
+  the collision vector (relayed through the room, they apply the knockback to
+  their own car); the impact costs the pusher a little speed.
+- 🧱 **Solid cars** — sprites never overlap or drive through each other: each
+  client ejects its own car out of any contact with another (the ejection
+  travels back through the snapshots, so both cars really separate). Driving
+  into a car kills your approach speed; grinding a flank bleeds a little more.
 - 🕹️ **No engine, no framework, no assets** — flat shapes drawn on an HTML
   Canvas, arcade physics, a hand-rolled RFC 6455 WebSocket server. `npm install`
   is literally a no-op.
@@ -90,6 +100,8 @@ mode and keeps retrying.
 | `W` / `Up` | accelerate |
 | `S` / `Down` | brake / reverse |
 | `A`, `D` or `Left`, `Right` | steer |
+| `Space` (held, mid-race) | turbo while behind another racer — cuts off when your noses are level |
+| Rear-end contact | shove the racer you hit along the collision vector (multiplayer) |
 | `R` or `Space` | back to the garage (after finishing) |
 | `G` | back to the garage (mid-race; in mp you leave the round alone) |
 | `N` | new random track (solo only — in mp the track is shared) |
@@ -97,6 +109,8 @@ mode and keeps retrying.
 
 In the **garage**: arrows/WASD move the selection, `R` picks a random vehicle,
 `ENTER` starts the race (solo) or ready-up / start-for-everyone (multiplayer).
+Turbo only arms when another racer is ahead on the road — in practice that
+means multiplayer, since solo races have no other cars.
 
 ## Rules
 
@@ -106,11 +120,18 @@ In the **garage**: arrows/WASD move the selection, `R` picks a random vehicle,
 - Leaving the road (grass or water) heavily slows the car down; it is not an
   instant crash.
 - The tunnel is narrow — one side is blocked by a rock, use the other half.
+- Rear-ending another car shoves it along the collision vector (the shove
+  fades in ~0.35 s) and slows the pusher slightly; side and head-on touches
+  do nothing. Solo races have no shoving — there is nobody to push.
+- Cars are solid: you cannot overlap, pass through or drive over another car
+  (including one parked at the finish line). The 120 ms snapshot interpolation
+  can allow a transient brush at very high speed, corrected on the next
+  snapshot.
 
 ## Tests
 
 ```bash
-npm test   # track stress (300 seeds) + virtual driver (40 tracks) + multiplayer e2e
+npm test   # track stress (300 seeds) + virtual driver (40 tracks) + multiplayer e2e + turbo, bump & solidity checks
 ```
 
 ## Project structure
@@ -134,7 +155,8 @@ src/
                 random walk (bounded curvature, self-avoidance) producing the
                 centerline waypoints and section fractions for a seed.
   car.js        Arcade car physics: acceleration, braking/reverse, drag,
-                speed-scaled steering, off-road slowdown; draws the car sprite.
+                speed-scaled steering, off-road slowdown, turbo boost while
+                chasing; draws the car sprite.
   input.js      Keyboard state (held + edge-triggered presses) and mapping to
                 {throttle, steer} drive commands.
   camera.js     Viewport logic: smooth follow with look-ahead in the direction
@@ -153,6 +175,12 @@ src/
                 no server is reachable.
   remotes.js    Other players' cars: snapshot buffer + interpolation ~120 ms
                 behind real time, name tags, staleness handling.
+  turbo.js      Turbo chase logic: nose-to-nose arc gap on the road, the
+                closest racer ahead as target, none once noses are level.
+  bump.js       Rear-end shoves: nose-vs-tail circle contact, rear-arc gate,
+                per-pair cooldown, knockback decay constants.
+  solidity.js   Car-vs-car solidity: eject our car out of any remote overlap
+                (relaxation passes), kill the approach velocity, scrape friction.
   effects.js    Splash particles (water contact) and crash FX.
   utils.js      Small shared math helpers (clamp/lerp, closest point on
                 segment, circle & oriented-box collision, rounded rect path).
@@ -160,9 +188,11 @@ server/
   wsserver.js   Minimal RFC 6455 WebSocket server (zero dependencies):
                 text frames, ping/pong, close handshake.
   room.js       The game room: lobby -> synced countdown -> race -> lobby.
-                Authoritative for the round flow; relays position snapshots;
-                scales road width with player count.
-tests/          Regression suite: track stress, virtual driver, multiplayer e2e.
+                Authoritative for the round flow; relays position snapshots
+                and rear-end pushes; scales road width with player count.
+tests/          Regression suite: track stress, virtual driver, multiplayer
+                e2e (incl. push relay), turbo chase + boost, rear-end bump,
+                car solidity.
 ```
 
 ### How a frame flows

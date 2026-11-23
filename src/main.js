@@ -4,6 +4,9 @@ import { Camera } from './camera.js';
 import { Input } from './input.js';
 import { getHitObstacle, isOffTrack, waterContact } from './collision.js';
 import { GameState, State } from './gameState.js';
+import { chaseTarget } from './turbo.js';
+import { contactBump, PUSHER_SLOWDOWN, vehicleById } from './bump.js';
+import { resolveCarOverlap } from './solidity.js';
 import { Garage } from './garage.js';
 import { Net } from './net.js';
 import { Remotes } from './remotes.js';
@@ -28,6 +31,7 @@ let mode = 'solo';            // 'mp' once the room connection is up
 let wasMp = false;            // ever connected to a room (for the CONN LOST hint)
 let myId = null;              // my player id in the room
 let finishedTimes = new Map();// remote id -> finish time (for the position label)
+let bumpCooldowns = new Map(); // remote id -> last rear-end shove (ms)
 let lastS = 0;                // my arc-length on the track (snapshots + ranking)
 let snapAccum = 0;
 let finishSent = false;
@@ -51,6 +55,7 @@ net.on('lobby', (m) => {
   myId = m.you;
   finishedTimes.clear();
   remotes.clear();
+  bumpCooldowns.clear();
   garage.setLobby(m.players, m.you);
   garage.raceInProgress = m.phase !== 'lobby';
   if (m.phase === 'lobby') {
@@ -74,7 +79,7 @@ net.on('countdown', (m) => {
   const pos = placeOnTrack(world.cl, slot.s, slot.off);
   car.x = pos.x; car.y = pos.y; car.angle = p.angle; car.speed = 0;
   lastS = slot.s; finishSent = false; snapAccum = 0;
-  remotes.clear(); finishedTimes.clear();
+  remotes.clear(); finishedTimes.clear(); bumpCooldowns.clear();
   for (const pl of m.players) {
     if (pl.id !== myId) remotes.setMeta(pl.id, { name: pl.name, color: pl.color, vehicleId: pl.vehicleId });
   }
@@ -97,6 +102,12 @@ net.on('finished', (m) => {
 });
 net.on('left', (m) => { remotes.remove(m.id); finishedTimes.delete(m.id); });
 net.on('splash', (m) => remotes.splash(m.id)); // another racer went into the drink
+net.on('push', (m) => {
+  // Someone rear-ended us: get shoved along their collision vector.
+  if (typeof m.dx === 'number' && typeof m.dy === 'number' && m.v > 0) {
+    car.applyKnock(m.dx, m.dy, m.v);
+  }
+});
 
 // ---- game objects -------------------------------------------------------------
 let world = createWorld(); // fresh random track on load (createWorld(0) = classic)
@@ -108,6 +119,7 @@ const gameState = new GameState(car);
 
 let phase = 'garage'; // garage -> countdown -> racing
 let waterWarn = false; // one wheel is already in the drink (HUD hint)
+let turboState = null; // null | 'ready' | 'on' (HUD hint, see turbo.js)
 tryConnect();
 
 function startRace() {
@@ -154,6 +166,7 @@ function myPositionLabel() {
 window.__canyonRun = {
   get world() { return world; },
   get car() { return car; },
+  get remotes() { return remotes; },
 };
 
 let last = performance.now();
@@ -176,8 +189,14 @@ function frame(now) {
     if (gameState.state !== State.COUNTDOWN) phase = 'racing'; // solo GO (mp waits for the server's 'go')
   } else if (phase === 'racing') {
     waterWarn = false;
+    turboState = null;
     if (gameState.state === State.PLAYING) {
-      car.update(dt, input.readDrive());
+      // Turbo: hold Space while a car is ahead on the track; it cuts off
+      // when our nose comes level with theirs (chaseTarget goes null).
+      const chase = chaseTarget(world, car, remotes, now);
+      const turbo = chase !== null && input.isDown('Space');
+      turboState = chase === null ? null : (turbo ? 'on' : 'ready');
+      car.update(dt, { ...input.readDrive(), turbo });
       const hit = getHitObstacle(car, world.obstacles);
       const drink = hit ? { wet: 0, sunk: false } : waterContact(car, world);
       if (hit) {
@@ -191,6 +210,26 @@ function frame(now) {
         const info = world.trackInfoAt(car.x, car.y);
         if (isOffTrack(info)) car.applyOffRoad(dt); // grass/water slows the car down
       }
+
+      // Rear-end shove: my nose in contact with another racer's tail pushes
+      // them along the collision vector — the server relays it, they apply
+      // the knockback to their own car (see server/room.js 'push').
+      if (mode === 'mp' && net.connected) {
+        for (const c of remotes.cars.values()) {
+          if (c.frozen) continue; // parked at the finish line: solid decor
+          const pos = remotes.sampleAt(c.id, now);
+          if (!pos) continue;
+          const bump = contactBump(car, { id: c.id, ...pos }, vehicleById(c.vehicleId), now, bumpCooldowns);
+          if (bump) {
+            net.send({ t: 'push', id: c.id, dx: bump.dirX, dy: bump.dirY, v: bump.v });
+            car.speed *= PUSHER_SLOWDOWN; // the impact costs me some momentum
+          }
+        }
+      }
+
+      // Solidity: eject our car out of any overlap with another car, so two
+      // sprites can never ride on top of each other (see solidity.js).
+      resolveCarOverlap(car, remotes, now, dt);
     }
 
     gameState.update(dt, world); // timer, win check, crash -> reset countdown
@@ -250,7 +289,7 @@ function frame(now) {
     let trackLabel = world.seed === 0 ? 'CLASSIC' : '#' + world.seed;
     if (wasMp && !net.connected) trackLabel += ' · CONN LOST'; // was mp, dropped mid-race
     gameState.drawHUD(ctx, w, h, info.section.name, isOffTrack(info),
-      trackLabel, car.vehicle.short, myPositionLabel(), waterWarn);
+      trackLabel, car.vehicle.short, myPositionLabel(), waterWarn, turboState);
   }
 
   requestAnimationFrame(frame);
