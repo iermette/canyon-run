@@ -15,7 +15,7 @@
     "dev": "node server.js",
     "start": "./launch.sh",
     "stop": "./launch.sh stop",
-    "test": "node tests/stress.mjs && node tests/drive.mjs && node tests/multiplayer.mjs && node tests/turbo.mjs && node tests/bump.mjs && node tests/solidity.mjs && node tests/water.mjs"
+    "test": "node tests/stress.mjs && node tests/drive.mjs && node tests/multiplayer.mjs && node tests/turbo.mjs && node tests/bump.mjs && node tests/solidity.mjs && node tests/water.mjs && node tests/netif.mjs && node tests/smoke-server.mjs"
   },
   "keywords": [
     "game",

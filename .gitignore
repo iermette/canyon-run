@@ -1,6 +1,8 @@
 # Local server runtime
 .server.log
 .server.pid
+.server.url
+.server.host
 
 # Editor / agent scratch dirs
 .playwright-mcp/

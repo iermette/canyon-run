@@ -62,6 +62,11 @@ Node static server is included:
 ./launch.sh        # quick start: launches the server and opens the browser
                    # (close the window to stop; ./launch.sh stop as fallback)
 npm run dev        # or simply: node server.js
+# At startup the server asks which network interface to use for multiplayer:
+# pick a line (1 = all, 2 = localhost, or a name/IP) — Enter takes the last choice.
+node server.js --host local        # non-interactive: localhost only
+node server.js --host eno1         # or an interface name, an IPv4, or "all"
+HOST=192.168.1.42 node server.js   # or via the HOST environment variable
 # then open http://localhost:8080  (PORT=3000 npm run dev to change port)
 ```
 
@@ -73,7 +78,7 @@ Alternative with any static server you already have: `npx serve .`
 The included `server.js` serves the game **and** hosts one shared room on the
 same port. To play with friends:
 
-1. Start the server as usual (`./launch.sh` or `node server.js`).
+1. Start the server as usual (`./launch.sh` or `node server.js`) — at startup pick the interface to bind (Enter = last choice, or all interfaces).
 2. Share your address: `http://localhost:8080` works for you; players on the
    same network use your LAN IP, e.g. `http://192.168.1.42:8080`
    (the server prints it at startup). The garage screen shows the exact URL
@@ -131,15 +136,16 @@ means multiplayer, since solo races have no other cars.
 ## Tests
 
 ```bash
-npm test   # track stress (300 seeds) + virtual driver (40 tracks) + multiplayer e2e + turbo, bump & solidity checks
+npm test   # track stress (300 seeds) + virtual driver (40 tracks) + multiplayer e2e + turbo, bump, solidity & water checks + interface selection (unit + smoke)
 ```
 
 ## Project structure
 
 ```
 index.html      Canvas + page shell, loads src/main.js as an ES module
-server.js       Zero-dependency Node server: static files + the multiplayer room
-                (prints your LAN IP to share with other players)
+server.js       Zero-dependency Node server: static files + the multiplayer room.
+                At startup asks which interface to bind (--host / HOST / --iface
+                for non-interactive launches); prints the URL to share.
 package.json    Only scripts — no dependencies
 docs/screens/   Screenshots used in this README
 src/
@@ -185,6 +191,9 @@ src/
   utils.js      Small shared math helpers (clamp/lerp, closest point on
                 segment, circle & oriented-box collision, rounded rect path).
 server/
+  netif.js      Interface selection: IPv4 listing, host resolution
+                (all|local|name|IPv4), interactive prompt, saved last choice
+                (.server.host).
   wsserver.js   Minimal RFC 6455 WebSocket server (zero dependencies):
                 text frames, ping/pong, close handshake.
   room.js       The game room: lobby -> synced countdown -> race -> lobby.
@@ -192,7 +201,7 @@ server/
                 and rear-end pushes; scales road width with player count.
 tests/          Regression suite: track stress, virtual driver, multiplayer
                 e2e (incl. push relay), turbo chase + boost, rear-end bump,
-                car solidity.
+                car solidity, water physics, interface selection (unit + smoke).
 ```
 
 ### How a frame flows
