@@ -50,9 +50,16 @@ export class Car {
 
     const cap = turbo ? s.maxSpeed * TURBO_MAX_MULT : s.maxSpeed;
     if (this.speed > cap) {
-      // Turbo cut-off (or off-road overshoot): ease back to the ceiling,
-      // no hard jump down when the boost ends.
-      this.speed += (cap - this.speed) * Math.min(1, 3 * dt);
+      if (turbo) {
+        // While boosting the ceiling is a hard limit: the boost is meant to
+        // hold the top speed, never to overshoot it (high-accel cars would
+        // otherwise sit a few % above the cap with a soft ceiling).
+        this.speed = cap;
+      } else {
+        // Turbo cut-off (or off-road overshoot): ease back to the lower
+        // ceiling, no hard jump down when the boost ends.
+        this.speed += (cap - this.speed) * Math.min(1, 3 * dt);
+      }
     } else {
       this.speed = clamp(this.speed, s.reverseMax, cap);
     }

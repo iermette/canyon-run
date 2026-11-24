@@ -36,7 +36,7 @@ class Room {
       id,
       name: String(name || '').slice(0, 16) || `Player ${this.players.size + 1}`,
       ws,
-      vehicleId: 'sports',
+      vehicleId: 'ferrari-288-gto',
       ready: false,
       color: PLAYER_COLORS[(this.nextId - 2) % PLAYER_COLORS.length],
     };
@@ -71,8 +71,15 @@ class Room {
 
       case 'ready':
         if (this.phase !== 'lobby') return;
-        p.vehicleId = typeof msg.vehicleId === 'string' ? msg.vehicleId.slice(0, 32) : 'sports';
+        p.vehicleId = typeof msg.vehicleId === 'string' ? msg.vehicleId.slice(0, 32) : 'ferrari-288-gto';
         p.ready = true;
+        for (const q of this.players.values()) this.sendLobbyTo(q);
+        break;
+
+      case 'vehicle':
+        // Garage selection changed. Remembered for the next countdown even
+        // without re-readying, so everyone draws the car this player picked.
+        p.vehicleId = typeof msg.vehicleId === 'string' ? msg.vehicleId.slice(0, 32) : 'ferrari-288-gto';
         for (const q of this.players.values()) this.sendLobbyTo(q);
         break;
 

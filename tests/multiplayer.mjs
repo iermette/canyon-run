@@ -77,15 +77,20 @@ check(true, 'rename broadcast to other players (Alice -> Zoe)');
 
 // ---- start the round -----------------------------------------------------------
 [A, B, C].forEach((c) => c.clear()); // drop lobby chatter from the joins
-A.send({ t: 'ready', vehicleId: 'tank' });
-await B.next((m) => m.t === 'lobby' && m.players.find((p) => p.id === A.id)?.vehicleId === 'tank');
+A.send({ t: 'ready', vehicleId: 'mclaren-f1' });
+await B.next((m) => m.t === 'lobby' && m.players.find((p) => p.id === A.id)?.vehicleId === 'mclaren-f1');
 check(true, 'ready message updates the lobby (Alice -> tank)');
+C.send({ t: 'vehicle', vehicleId: 'dodge-viper' }); // changed pick without re-readying
+await B.next((m) => m.t === 'lobby' && m.players.find((p) => p.id === C.id)?.vehicleId === 'dodge-viper');
+check(true, 'vehicle change without ready updates the lobby (Carol -> bus)');
 [A, B, C].forEach((c) => c.clear()); // only round messages from here on
 
 A.send({ t: 'start' });
 const cd = await Promise.all([A.next((m) => m.t === 'countdown'), B.next((m) => m.t === 'countdown'), C.next((m) => m.t === 'countdown')]);
 check(cd.every((m) => m.seed > 0 && m.slots.length === 3), `countdown broadcast to all with 3 grid slots (seed ${cd[0].seed})`);
 check(cd.every((m) => m.players.find((p) => p.id === A.id)?.name === 'Zoe'), 'renamed player keeps the new name in the countdown payload');
+check(cd.every((m) => m.players.find((p) => p.id === A.id)?.vehicleId === 'mclaren-f1'
+  && m.players.find((p) => p.id === C.id)?.vehicleId === 'dodge-viper'), "countdown payload carries every player's current vehicle");
 check(cd.every((m) => Math.abs(m.widthFactor - room.widthFactor) < 1e-9), 'all clients get the same width factor');
 const s = cd[0].slots.map((x) => x.s).sort((a, b) => a - b);
 check(s.every((v) => v >= 5 && v <= cd[0].startLineS), `grid sits behind the start line (s=${s.join(',')} line=${cd[0].startLineS})`);

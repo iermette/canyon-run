@@ -17,7 +17,7 @@ export class Remotes {
   setMeta(id, meta) {
     let c = this.cars.get(id);
     if (!c) { // known from the lobby/countdown before any snapshot arrived
-      c = { id, name: '', color: '#ffffff', vehicleId: 'sports', s: 0, frozen: false, snaps: [] };
+      c = { id, name: '', color: '#ffffff', vehicleId: 'ferrari-288-gto', s: 0, frozen: false, snaps: [] };
       this.cars.set(id, c);
     }
     Object.assign(c, meta);
@@ -26,7 +26,7 @@ export class Remotes {
   update(id, snap) {
     let c = this.cars.get(id);
     if (!c) {
-      c = { id, name: '', color: '#ffffff', vehicleId: 'sports', s: 0, frozen: false, snaps: [] };
+      c = { id, name: '', color: '#ffffff', vehicleId: 'ferrari-288-gto', s: 0, frozen: false, snaps: [] };
       this.cars.set(id, c);
     }
     const now = performance.now();

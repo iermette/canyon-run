@@ -10,6 +10,7 @@ import { resolveCarOverlap } from './solidity.js';
 import { Garage } from './garage.js';
 import { Net } from './net.js';
 import { Remotes } from './remotes.js';
+import { loadTextures } from './textures.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -22,6 +23,10 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 resize();
+
+// 8-bit tiles: load grass + asphalt and turn them into repeating patterns.
+// Fire-and-forget — drawScene falls back to the flat colors until they're in.
+loadTextures(ctx);
 
 // ---- multiplayer wiring -------------------------------------------------------
 const playerName = new URLSearchParams(location.search).get('name') || '';
@@ -83,6 +88,10 @@ net.on('countdown', (m) => {
   for (const pl of m.players) {
     if (pl.id !== myId) remotes.setMeta(pl.id, { name: pl.name, color: pl.color, vehicleId: pl.vehicleId });
   }
+  // Own car uses the vehicle id the server broadcast, so everyone's windows
+  // show the same sprite for every player (startRace() only covers solo).
+  const me = m.players.find((pl) => pl.id === myId);
+  car.setVehicle(vehicleById(me ? me.vehicleId : garage.selected.id));
   phase = 'countdown';
   gameState.beginCountdown(m.duration / 1000, true); // synced: the server's 'go' ends it
   camera.snapTo(car.x, car.y);
@@ -121,6 +130,21 @@ let phase = 'garage'; // garage -> countdown -> racing
 let waterWarn = false; // one wheel is already in the drink (HUD hint)
 let turboState = null; // null | 'ready' | 'on' (HUD hint, see turbo.js)
 tryConnect();
+
+// Mouse picking in the garage: the canvas is fullscreen, so client coords are
+// already the screen-space coords the garage draws its cards in.
+canvas.addEventListener('click', (e) => {
+  if (phase !== 'garage' || !garage.nameDone) return;
+  const action = garage.handleClick(e.clientX, e.clientY);
+  if (action === 'select' && mode === 'mp') {
+    garage.localReady = false; // new selection: my 'ready' is stale
+    net.send({ t: 'vehicle', vehicleId: garage.selected.id });
+  } else if (action === 'confirm') {
+    if (mode === 'solo') startRace();
+    else if (!garage.localReady) { garage.localReady = true; net.send({ t: 'ready', vehicleId: garage.selected.id }); }
+    else net.send({ t: 'start' });
+  }
+});
 
 function startRace() {
   car.setVehicle(garage.selected);
@@ -183,6 +207,7 @@ function frame(now) {
       net.send({ t: 'name', name: garage.name });
     } else if (action === 'confirm') startRace();
     else if (mode === 'mp' && action === 'ready') net.send({ t: 'ready', vehicleId: garage.selected.id });
+    else if (mode === 'mp' && action === 'vehicle') net.send({ t: 'vehicle', vehicleId: garage.selected.id });
     else if (mode === 'mp' && action === 'start') net.send({ t: 'start' });
   } else if (phase === 'countdown') {
     gameState.update(dt, world); // checkered countdown display

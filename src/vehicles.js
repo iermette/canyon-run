@@ -1,347 +1,244 @@
 import { roundRectPath } from './utils.js';
+import { CARS } from './vehicleData.js';
 
-// Vehicle catalog — every vehicle is drawn top-down in local coordinates:
-// centered on (0, 0), nose pointing +x. Sizes are comparable to the original
-// car (~36 x 20 units) so all of them fit the narrowest road section.
+// Vehicle catalog — every car is drawn top-down in local coordinates, centered
+// on (0,0) with the nose pointing +x. Sizes stay comparable to the old set
+// (~36 x 20) so all of them fit the narrowest road section (tunnel, width 95).
+//
+// Data (color, roof, stripe, archetype, stats) lives in vehicleData.js. This
+// module turns each row into a playable vehicle: derived physics, colliders,
+// wheel contacts, and a parametric 8-bit top-down painter keyed on the
+// archetype — so a new car is one data row, not a new draw function.
 //
 // stats: maxSpeed / accel / brake in units/s(²), turnRate rad/s, reverseMax < 0.
-// colliders: circles in local space used for obstacle hits (long vehicles use
-// two circles nose + tail instead of one big one).
-// wheelBox: [frontAxleX, rearAxleX, halfTrack] — the four wheel contact points
-// used for the "in the drink" test. Keep it aligned with the wheels() the draw
-// function paints (for tracked/wheeled-in-line vehicles it is the contact band).
+// colliders: circles in local space for obstacle hits (long vehicles use two,
+// nose + tail). wheelPts: the four wheel contacts for the "in the drink" test,
+// ordered front-left, front-right, rear-left, rear-right (diagonal pairs 0&3, 1&2).
 
-const WHEEL = '#1c1f24';
-const GLASS = '#cfe4ff';
+// ---- small color helpers ------------------------------------------------------
 
-function wheels(ctx, xs, yHalf, w = 9, h = 5) {
-  ctx.fillStyle = WHEEL;
-  for (const x of xs) {
-    ctx.fillRect(x - w / 2, -yHalf - h / 2, w, h);
-    ctx.fillRect(x - w / 2, yHalf - h / 2, w, h);
-  }
-}
-
-function body(ctx, len, wid, r = 6) {
-  roundRectPath(ctx, -len / 2, -wid / 2, len, wid, r);
-  ctx.fill();
-}
-
-// ---- draw functions ----------------------------------------------------------
-
-// Red race car with twin white stripes and a rear wing.
-function drawSports(ctx) {
-  wheels(ctx, [-13, 13], 10.5);
-  ctx.fillStyle = '#d64541';
-  body(ctx, 38, 17, 7);
-  ctx.fillStyle = '#2a2d33'; // rear wing
-  ctx.fillRect(-19, -9, 4, 18);
-  ctx.fillStyle = '#f4f6f8'; // twin racing stripes
-  ctx.fillRect(-15, -4.5, 30, 3);
-  ctx.fillRect(-15, 1.5, 30, 3);
-  ctx.fillStyle = '#274b6d'; // cockpit
-  roundRectPath(ctx, -4, -5.5, 12, 11, 4);
-  ctx.fill();
-}
-
-// Yellow cab with roof checkers and a taxi sign.
-function drawTaxi(ctx) {
-  wheels(ctx, [-12, 12], 10);
-  ctx.fillStyle = '#ffd23e';
-  body(ctx, 36, 18, 6);
-  for (let i = 0; i < 5; i++) { // roof checker strip
-    ctx.fillStyle = i % 2 ? '#f4f6f8' : '#22252b';
-    ctx.fillRect(-10 + i * 4, -3.5, 4, 7);
-  }
-  ctx.fillStyle = '#ffffff'; // roof sign
-  roundRectPath(ctx, 7, -3, 6, 6, 1.5);
-  ctx.fill();
-  ctx.fillStyle = GLASS;
-  ctx.fillRect(-8, -7, 9, 14);
-}
-
-// White patrol car with a blue stripe and a red/blue light bar.
-function drawPolice(ctx) {
-  wheels(ctx, [-12, 12], 10);
-  ctx.fillStyle = '#eef2f7';
-  body(ctx, 36, 18, 6);
-  ctx.fillStyle = '#2b5fd9'; // center stripe
-  ctx.fillRect(-18, -2.5, 36, 5);
-  ctx.fillStyle = GLASS;
-  ctx.fillRect(-7, -7, 9, 14);
-  ctx.fillStyle = '#e04b3a'; // light bar (red side)
-  ctx.fillRect(6, -6, 4, 5);
-  ctx.fillStyle = '#3d7eff'; // light bar (blue side)
-  ctx.fillRect(6, 1, 4, 5);
-}
-
-// Boxy white van with a red cross on the roof.
-function drawAmbulance(ctx) {
-  wheels(ctx, [-13, 13], 10);
-  ctx.fillStyle = '#f4f6f8';
-  body(ctx, 40, 19, 5);
-  ctx.fillStyle = '#e04b3a'; // roof cross
-  ctx.fillRect(-9, -7, 4, 14);
-  ctx.fillRect(-15, -2, 14, 4);
-  ctx.fillStyle = GLASS;
-  ctx.fillRect(14, -8, 4, 16);
-}
-
-// Long red truck with a ladder along the roof.
-function drawFire(ctx) {
-  wheels(ctx, [-20, -8, 14], 11.5, 9, 6);
-  ctx.fillStyle = '#d64541';
-  body(ctx, 56, 20, 5);
-  ctx.fillStyle = GLASS; // cab windshield
-  ctx.fillRect(20, -8, 5, 16);
-  ctx.fillStyle = '#9aa3ad'; // ladder rails + rungs
-  ctx.fillRect(-24, -3.5, 40, 7);
-  ctx.fillStyle = '#6d7680';
-  for (let i = 0; i < 8; i++) ctx.fillRect(-21 + i * 5, -3.5, 2, 7);
-}
-
-// Yellow cab with a grey mixing drum on the back.
-function drawMixer(ctx) {
-  wheels(ctx, [-14, 10], 11.5, 9, 6);
-  ctx.fillStyle = '#8d939c'; // drum (capsule seen from above)
-  roundRectPath(ctx, -24, -8, 30, 16, 8);
-  ctx.fill();
-  ctx.strokeStyle = '#6d747e'; // spiral hint on the drum
-  ctx.lineWidth = 2;
-  for (let i = 0; i < 3; i++) {
-    ctx.beginPath();
-    ctx.moveTo(-19 + i * 8, -8);
-    ctx.lineTo(-15 + i * 8, 8);
-    ctx.stroke();
-  }
-  ctx.fillStyle = '#ffd23e'; // cab
-  roundRectPath(ctx, 6, -9.5, 14, 19, 4);
-  ctx.fill();
-  ctx.fillStyle = GLASS;
-  ctx.fillRect(17, -8, 3, 16);
-}
-
-// Orange cab with an open ribbed bed.
-function drawDump(ctx) {
-  wheels(ctx, [-14, 8], 11.5, 9, 6);
-  ctx.fillStyle = '#b07a3e'; // bed walls
-  roundRectPath(ctx, -24, -9, 28, 18, 3);
-  ctx.fill();
-  ctx.fillStyle = '#8a5c2c'; // bed floor
-  roundRectPath(ctx, -21.5, -6.5, 23, 13, 2);
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,0.25)'; // ribs
-  ctx.lineWidth = 1.5;
-  for (let i = 1; i < 4; i++) {
-    const x = -24 + i * 7;
-    ctx.beginPath(); ctx.moveTo(x, -9); ctx.lineTo(x, 9); ctx.stroke();
-  }
-  ctx.fillStyle = '#f08c2e'; // cab
-  roundRectPath(ctx, 4, -10, 16, 20, 4);
-  ctx.fill();
-  ctx.fillStyle = GLASS;
-  ctx.fillRect(17, -8, 3, 16);
-}
-
-// Orange semi cab pulling a flatbed of wooden planks.
-function drawFlatbed(ctx) {
-  wheels(ctx, [-20, -10, 12], 11.5, 9, 6);
-  ctx.fillStyle = '#a87c4f'; // plank bed
-  roundRectPath(ctx, -30, -8.5, 34, 17, 2);
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,0.28)';
-  ctx.lineWidth = 1.5;
-  for (let i = 1; i < 6; i++) {
-    const x = -30 + i * (34 / 6);
-    ctx.beginPath(); ctx.moveTo(x, -8.5); ctx.lineTo(x, 8.5); ctx.stroke();
-  }
-  ctx.fillStyle = '#f08c2e'; // cab
-  roundRectPath(ctx, 4, -10, 16, 20, 4);
-  ctx.fill();
-  ctx.fillStyle = GLASS;
-  ctx.fillRect(17, -8, 3, 16);
-}
-
-// Red double-decker: long body with two rows of side windows.
-function drawBus(ctx) {
-  wheels(ctx, [-24, -12, 18], 11.5, 9, 6);
-  ctx.fillStyle = '#d64541';
-  body(ctx, 64, 20, 6);
-  ctx.fillStyle = GLASS; // window rows on both sides
-  for (let i = 0; i < 8; i++) {
-    const x = -27 + i * 7;
-    ctx.fillRect(x, -9.5, 5, 3);
-    ctx.fillRect(x, 6.5, 5, 3);
-  }
-  ctx.fillRect(28, -8, 4, 16); // windshield
-}
-
-// Olive hull on dark tracks with a turret and long barrel.
-function drawTank(ctx) {
-  ctx.fillStyle = '#2a2d33'; // tracks
-  roundRectPath(ctx, -17, -11.5, 34, 6, 3); ctx.fill();
-  roundRectPath(ctx, -17, 5.5, 34, 6, 3); ctx.fill();
-  ctx.fillStyle = '#5f7a3e'; // hull
-  body(ctx, 32, 18, 4);
-  ctx.fillStyle = '#4c6330'; // turret + barrel
-  ctx.beginPath(); ctx.arc(0, 0, 7.5, 0, Math.PI * 2); ctx.fill();
-  ctx.fillRect(0, -2.5, 20, 5);
-}
-
-// Small pink scooter: two thin wheels, low body, handlebar.
-function drawMoto(ctx) {
-  ctx.fillStyle = WHEEL; // wheels
-  ctx.fillRect(-11, -3, 6, 6);
-  ctx.fillRect(7, -3, 6, 6);
-  ctx.fillStyle = '#ff7ab8'; // body
-  roundRectPath(ctx, -9, -4.5, 18, 9, 4);
-  ctx.fill();
-  ctx.fillStyle = WHEEL; // seat + handlebar
-  ctx.fillRect(-6, -3, 6, 6);
-  ctx.strokeStyle = WHEEL;
-  ctx.lineWidth = 2.5;
-  ctx.beginPath(); ctx.moveTo(9, -6); ctx.lineTo(9, 6); ctx.stroke();
-}
-
-// White van with orange stripes and an ice-cream cone on the roof.
-function drawIceCream(ctx) {
-  wheels(ctx, [-12, 12], 10);
-  ctx.fillStyle = '#f4f6f8';
-  body(ctx, 38, 19, 5);
-  ctx.fillStyle = '#ff9d5c'; // side stripes
-  ctx.fillRect(-17, -9.5, 30, 3);
-  ctx.fillRect(-17, 6.5, 30, 3);
-  ctx.fillStyle = '#e8b04c'; // cone (tip pointing back)
-  ctx.beginPath();
-  ctx.moveTo(-1, -2.5); ctx.lineTo(-1, 2.5); ctx.lineTo(-9, 0);
-  ctx.closePath(); ctx.fill();
-  ctx.fillStyle = '#ff9ec7'; // scoop
-  ctx.beginPath(); ctx.arc(1, 0, 4, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = GLASS;
-  ctx.fillRect(15, -8, 3.5, 16);
-}
-
-// ---- catalog ------------------------------------------------------------------
-
-export const VEHICLES = [
-  {
-    id: 'sports', name: 'Sports Car', short: 'SPORTS',
-    blurb: 'Top-speed king — fast to launch, sharp in the corners.',
-    stats: { maxSpeed: 400, accel: 480, brake: 560, turnRate: 2.9, reverseMax: -150 },
-    colliders: [{ dx: 0, dy: 0, r: 15 }],
-    wheelBox: [13, -13, 10.5],
-    draw: drawSports,
-  },
-  {
-    id: 'taxi', name: 'Taxi', short: 'TAXI',
-    blurb: 'The city classic — balanced and dependable.',
-    stats: { maxSpeed: 320, accel: 400, brake: 520, turnRate: 2.6, reverseMax: -130 },
-    colliders: [{ dx: 0, dy: 0, r: 16 }],
-    wheelBox: [12, -12, 10],
-    draw: drawTaxi,
-  },
-  {
-    id: 'police', name: 'Police Car', short: 'POLICE',
-    blurb: 'Built for pursuit — quick and nimble.',
-    stats: { maxSpeed: 370, accel: 460, brake: 580, turnRate: 2.8, reverseMax: -140 },
-    colliders: [{ dx: 0, dy: 0, r: 16 }],
-    wheelBox: [12, -12, 10],
-    draw: drawPolice,
-  },
-  {
-    id: 'ambulance', name: 'Ambulance', short: 'AMBULANCE',
-    blurb: 'Every second counts — steady all-rounder.',
-    stats: { maxSpeed: 300, accel: 380, brake: 500, turnRate: 2.4, reverseMax: -120 },
-    colliders: [{ dx: 0, dy: 0, r: 16 }],
-    wheelBox: [13, -13, 10],
-    draw: drawAmbulance,
-  },
-  {
-    id: 'moto', name: 'Scooter', short: 'SCOOTER',
-    blurb: 'Tiny and twitchy — fastest launch in the garage.',
-    stats: { maxSpeed: 360, accel: 520, brake: 600, turnRate: 3.4, reverseMax: -110 },
-    colliders: [{ dx: 0, dy: 0, r: 10 }],
-    wheelBox: [10, -8, 0], // in line: both wheels are each other's opposite
-    draw: drawMoto,
-  },
-  {
-    id: 'icecream', name: 'Ice Cream Van', short: 'ICE CREAM',
-    blurb: 'Sweet ride — light handling with a friendly face.',
-    stats: { maxSpeed: 290, accel: 360, brake: 480, turnRate: 2.3, reverseMax: -115 },
-    colliders: [{ dx: 0, dy: 0, r: 16 }],
-    wheelBox: [12, -12, 10],
-    draw: drawIceCream,
-  },
-  {
-    id: 'firetruck', name: 'Fire Truck', short: 'FIRE TRUCK',
-    blurb: 'Heavy and long — slow to turn, hard to stop.',
-    stats: { maxSpeed: 240, accel: 260, brake: 420, turnRate: 1.9, reverseMax: -100 },
-    colliders: [{ dx: -18, dy: 0, r: 9 }, { dx: 18, dy: 0, r: 9 }],
-    wheelBox: [14, -20, 11.5],
-    draw: drawFire,
-  },
-  {
-    id: 'mixer', name: 'Cement Mixer', short: 'MIXER',
-    blurb: 'The drum keeps spinning — patience wins races.',
-    stats: { maxSpeed: 220, accel: 240, brake: 400, turnRate: 1.8, reverseMax: -90 },
-    colliders: [{ dx: -12, dy: 0, r: 9 }, { dx: 12, dy: 0, r: 9 }],
-    wheelBox: [10, -14, 11.5],
-    draw: drawMixer,
-  },
-  {
-    id: 'dump', name: 'Dump Truck', short: 'DUMP TRUCK',
-    blurb: 'Hauling the load — torquey but sluggish.',
-    stats: { maxSpeed: 230, accel: 250, brake: 410, turnRate: 1.8, reverseMax: -95 },
-    colliders: [{ dx: -13, dy: 0, r: 9 }, { dx: 13, dy: 0, r: 9 }],
-    wheelBox: [8, -14, 11.5],
-    draw: drawDump,
-  },
-  {
-    id: 'flatbed', name: 'Flatbed Semi', short: 'FLATBED',
-    blurb: 'Long hauler — big brakes, wide turns.',
-    stats: { maxSpeed: 260, accel: 270, brake: 430, turnRate: 1.7, reverseMax: -100 },
-    colliders: [{ dx: -19, dy: 0, r: 9 }, { dx: 19, dy: 0, r: 9 }],
-    wheelBox: [12, -20, 11.5],
-    draw: drawFlatbed,
-  },
-  {
-    id: 'bus', name: 'Double-Decker Bus', short: 'BUS',
-    blurb: 'Two floors of passengers — the longest ride in town.',
-    stats: { maxSpeed: 250, accel: 250, brake: 420, turnRate: 1.6, reverseMax: -90 },
-    colliders: [{ dx: -21, dy: 0, r: 9 }, { dx: 21, dy: 0, r: 9 }],
-    wheelBox: [18, -24, 11.5],
-    draw: drawBus,
-  },
-  {
-    id: 'tank', name: 'Tank', short: 'TANK',
-    blurb: 'Slow as a glacier — but that torque is no joke.',
-    stats: { maxSpeed: 200, accel: 300, brake: 480, turnRate: 1.4, reverseMax: -120 },
-    colliders: [{ dx: 0, dy: 0, r: 15 }],
-    wheelBox: [15, -15, 8.5], // tracks: contact band along the hull
-    draw: drawTank,
-  },
-];
-
-// The four wheel contact points in local space, in the order front-left,
-// front-right, rear-left, rear-right — so indices (0,3) and (1,2) are the two
-// diagonal pairs. Used by car.wheelContacts() / collision.waterContact().
-for (const v of VEHICLES) {
-  const [fx, rx, hy] = v.wheelBox;
-  v.wheelPts = [
-    { dx: fx, dy: -hy }, { dx: fx, dy: hy },
-    { dx: rx, dy: -hy }, { dx: rx, dy: hy },
-  ];
-}
-
-// Normalized stat values (0..1) for the garage's little bars.
-const norm = (key) => {
-  const vals = VEHICLES.map((v) => v.stats[key]);
-  const min = Math.min(...vals), max = Math.max(...vals);
-  return VEHICLES.map((v) => (max === min ? 0.5 : (v.stats[key] - min) / (max - min)));
+const hexToRgb = (hex) => {
+  const h = hex.replace('#', '');
+  const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+};
+const rgbToHex = ({ r, g, b }) =>
+  '#' + [r, g, b].map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('');
+const shade = (hex, amt) => { // amt -1..1 : negative darkens, positive lightens
+  const { r, g, b } = hexToRgb(hex);
+  const t = amt < 0 ? 0 : 255, p = Math.abs(amt);
+  return rgbToHex({ r: r + (t - r) * p, g: g + (t - g) * p, b: b + (t - b) * p });
+};
+const luminance = (hex) => {
+  const { r, g, b } = hexToRgb(hex);
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
 };
 
+// A stripe that always reads against the body: light body → dark stripe,
+// dark body → light stripe.
+function stripeColor(body) {
+  return luminance(body) > 0.6 ? '#20242b' : '#f2f4f8';
+}
+
+// ---- archetype profiles -------------------------------------------------------
+// Geometry in local units (nose +x). `canopy` is the glass band as fractions of
+// length: [frontEdge, rearEdge] measured from the center. Feature flags drive
+// the distinctive bits of each silhouette.
+const ARCH = {
+  HY: { len: 46, wid: 23, r: 6,  wing: 1.0, canopy: [0.16, 0.60], splitter: true,  mirrors: true  },
+  SC: { len: 44, wid: 22, r: 6,  wing: 0.8, canopy: [0.16, 0.58], splitter: true,  mirrors: true  },
+  MU: { len: 48, wid: 22, r: 5,  wing: 0.0, canopy: [0.10, 0.50], hoodScoop: true, mirrors: false },
+  RR: { len: 40, wid: 21, r: 7,  wing: 0.0, canopy: [0.22, 0.56], wideRear: true,  mirrors: true  },
+  CU: { len: 40, wid: 20, r: 6,  wing: 0.0, canopy: [0.18, 0.55], mirrors: true    },
+  RT: { len: 38, wid: 20, r: 7,  wing: 0.0, canopy: [0.20, 0.56], round: true,     mirrors: true  },
+  HA: { len: 36, wid: 19, r: 5,  wing: 0.0, canopy: [0.24, 0.60], boxy: true,      mirrors: true  },
+  SD: { len: 44, wid: 19, r: 5,  wing: 0.0, canopy: [0.26, 0.58], boxy: true,      mirrors: true  },
+  WA: { len: 46, wid: 19, r: 5,  wing: 0.0, canopy: [0.24, 0.66], boxy: true,      mirrors: true  },
+  SV: { len: 46, wid: 23, r: 6,  wing: 0.0, canopy: [0.26, 0.60], boxy: true, tall: true,  mirrors: true },
+};
+
+// ---- parametric 8-bit painter -------------------------------------------------
+
+function paintWheels(ctx, len, wid, tall) {
+  const h = tall ? 6 : 5;
+  const w = 10;
+  const yH = wid / 2;
+  const xF = len / 2 - 10;
+  const xR = -len / 2 + 12;
+  ctx.fillStyle = '#14161b';
+  for (const x of [xF, xR]) {
+    roundRectPath(ctx, x - w / 2, -yH - h / 2 - 1, w, h, 2); ctx.fill();
+    roundRectPath(ctx, x - w / 2, yH - h / 2 + 1, w, h, 2); ctx.fill();
+  }
+  // hubs (a lighter dot so the wheels read as wheels, not blobs)
+  ctx.fillStyle = '#3a4048';
+  for (const x of [xF, xR]) {
+    ctx.fillRect(x - 1.5, -yH - h / 2 + 1, 3, 3);
+    ctx.fillRect(x - 1.5, yH - h / 2 - 1, 3, 3);
+  }
+}
+
+function paintBody(ctx, p, body, roof, stripe) {
+  const L = p.len, W = p.wid, r = p.r;
+
+  // drop shadow (offset to the lower-right for a sense of height)
+  ctx.fillStyle = 'rgba(8,10,14,0.32)';
+  roundRectPath(ctx, -L / 2 + 3, -W / 2 + 4, L, W, r); ctx.fill();
+
+  // rear wing (behind the body) — sport archetypes
+  if (p.wing > 0) {
+    const wingW = W * (0.72 + 0.3 * p.wing);
+    ctx.fillStyle = shade(body, -0.45);
+    roundRectPath(ctx, -L / 2 - 4, -wingW / 2, 6, wingW, 2); ctx.fill();
+    ctx.fillStyle = shade(roof, -0.5);
+    ctx.fillRect(-L / 2 - 4, -wingW / 2, 6, 3); // wing endplates
+    ctx.fillRect(-L / 2 - 4, wingW / 2 - 3, 6, 3);
+  }
+
+  // main body shell
+  ctx.fillStyle = body;
+  roundRectPath(ctx, -L / 2, -W / 2, L, W, r); ctx.fill();
+  // chunky 8-bit outline
+  ctx.strokeStyle = 'rgba(10,12,16,0.85)';
+  ctx.lineWidth = 2;
+  roundRectPath(ctx, -L / 2, -W / 2, L, W, r); ctx.stroke();
+
+  // nose taper: a lighter trapezoid on the front third for low sport cars
+  if (p.splitter || p.wing > 0.5) {
+    ctx.fillStyle = shade(body, 0.10);
+    ctx.beginPath();
+    ctx.moveTo(L / 2, -W / 2 + 3);
+    ctx.lineTo(L / 2 - L * 0.22, -W * 0.30);
+    ctx.lineTo(L / 2 - L * 0.22, W * 0.30);
+    ctx.lineTo(L / 2, W / 2 - 3);
+    ctx.closePath(); ctx.fill();
+  }
+
+  // hood scoop for muscle cars
+  if (p.hoodScoop) {
+    ctx.fillStyle = shade(body, -0.35);
+    roundRectPath(ctx, L * 0.08, -W * 0.16, L * 0.16, W * 0.32, 3); ctx.fill();
+    ctx.strokeStyle = 'rgba(10,12,16,0.6)'; ctx.lineWidth = 1.5;
+    roundRectPath(ctx, L * 0.08, -W * 0.16, L * 0.16, W * 0.32, 3); ctx.stroke();
+  }
+
+  // roof / greenhouse
+  const cx0 = (p.canopy[0] - 0.5) * L; // front edge of canopy (center-relative)
+  const cx1 = (p.canopy[1] - 0.5) * L; // rear edge
+  const cw = cx1 - cx0;
+  const roofW = W * (p.boxy ? 0.74 : 0.66);
+  ctx.fillStyle = roof;
+  roundRectPath(ctx, cx0, -roofW / 2, cw, roofW, p.round ? 9 : 4); ctx.fill();
+  ctx.strokeStyle = 'rgba(10,12,16,0.5)'; ctx.lineWidth = 1.5;
+  roundRectPath(ctx, cx0, -roofW / 2, cw, roofW, p.round ? 9 : 4); ctx.stroke();
+
+  // glass windshield strip (front of canopy) + rear glass (back of canopy)
+  ctx.fillStyle = '#bfe0ff';
+  ctx.globalAlpha = 0.9;
+  const ws = Math.min(L * 0.07, 6);
+  roundRectPath(ctx, cx0, -roofW / 2 + 2, ws, roofW - 4, 2); ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#9cc8f0';
+  roundRectPath(ctx, cx1 - ws, -roofW / 2 + 3, ws * 0.8, roofW - 6, 2); ctx.fill();
+
+  // livery
+  if (stripe === 'twin') {
+    ctx.fillStyle = stripeColor(body);
+    ctx.fillRect(-L / 2 + 4, -3.2, L - 8, 2.4);
+    ctx.fillRect(-L / 2 + 4, 0.8, L - 8, 2.4);
+  } else if (stripe === 'side') {
+    ctx.fillStyle = stripeColor(body);
+    ctx.fillRect(-L / 2 + 4, -W / 2 + 2.5, L - 8, 3);
+    ctx.fillRect(-L / 2 + 4, W / 2 - 5.5, L - 8, 3);
+  }
+
+  // side mirrors
+  if (p.mirrors) {
+    ctx.fillStyle = shade(body, -0.3);
+    ctx.fillRect(cx1 + 2, -W / 2 - 2.5, 4, 3);
+    ctx.fillRect(cx1 + 2, W / 2 - 0.5, 4, 3);
+  }
+
+  // lights
+  ctx.fillStyle = '#fff6d8'; // headlights
+  ctx.fillRect(L / 2 - 4, -W / 2 + 3, 3.4, 4);
+  ctx.fillRect(L / 2 - 4, W / 2 - 7, 3.4, 4);
+  ctx.fillStyle = '#ff4b3e'; // tail lights
+  ctx.fillRect(-L / 2 + 1, -W / 2 + 3, 3, 4);
+  ctx.fillRect(-L / 2 + 1, W / 2 - 7, 3, 4);
+  if (p.wing > 0.5) { // full-width LED bar on hypercars
+    ctx.fillStyle = '#ff2b2b';
+    ctx.fillRect(-L / 2 + 1, -W * 0.3, 2.4, W * 0.6);
+  }
+}
+
+function drawCar(ctx, car) {
+  const p = ARCH[car.arch] || ARCH.CU;
+  paintWheels(ctx, p.len, p.wid, !!p.tall);
+  paintBody(ctx, p, car.body, car.roof, car.stripe);
+}
+
+// ---- catalog assembly ---------------------------------------------------------
+
+const N = CARS.length;
+const normOf = (key) => {
+  const vals = CARS.map((c) => c[key]);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  return CARS.map((c) => (max === min ? 0.5 : (c[key] - min) / (max - min)));
+};
+const Ntop = normOf('top'), Na = normOf('a'), Ncls = normOf('cls'), Nhd = normOf('handle');
+
+function buildVehicle(c, i) {
+  const p = ARCH[c.arch] || ARCH.CU;
+  const L = p.len, W = p.wid;
+  const half = L / 2;
+
+  const maxSpeed = Math.round(180 + Ntop[i] * 260);            // 180..440 u/s
+  const accel    = Math.round(560 - Na[i] * 320);               // 560..240 (a: fast→slow)
+  const brake    = Math.round(380 + Ncls[i] * 200);             // 380..580
+  const turnRate = +(1.6 + Nhd[i] * 1.7).toFixed(2);            // 1.6..3.3 rad/s
+  const reverseMax = -Math.round(95 + Ntop[i] * 55);            // -95..-150
+
+  // Colliders: long vehicles (muscle, wagon, sv) get nose + tail circles.
+  const two = c.arch === 'MU' || c.arch === 'WA' || c.arch === 'SV' || c.arch === 'SD';
+  const r = Math.max(12, W / 2 + 2);
+  const colliders = two
+    ? [{ dx: -half * 0.5, dy: 0, r: r * 0.9 }, { dx: half * 0.5, dy: 0, r: r * 0.9 }]
+    : [{ dx: 0, dy: 0, r }];
+
+  // Wheels sit just inside the painted tires; half-track slightly under the
+  // body edge so a car parked on the line still clips the water with two wheels.
+  const trackHalf = W / 2 - 2;
+  const wheelPts = [
+    { dx: half - 10, dy: -trackHalf }, // front-left
+    { dx: half - 10, dy: trackHalf },  // front-right
+    { dx: -(half - 12), dy: -trackHalf }, // rear-left
+    { dx: -(half - 12), dy: trackHalf },  // rear-right
+  ];
+
+  return {
+    id: c.id,
+    name: `${c.maker} ${c.model}`,
+    short: c.model.toUpperCase().replace(/\s+/g, ' '),
+    blurb: `${c.era} · ${c.region === 'EU' ? 'Europe' : c.region === 'NA' ? 'Am. du Nord' : 'Japon & Asie'} · ${c.top} km/h`,
+    arch: c.arch,
+    era: c.era,
+    region: c.region,
+    body: c.body,
+    roof: c.roof,
+    stripe: c.stripe,
+    stats: { maxSpeed, accel, brake, turnRate, reverseMax },
+    colliders,
+    wheelPts,
+    draw: (ctx) => drawCar(ctx, { arch: c.arch, body: c.body, roof: c.roof, stripe: c.stripe }),
+  };
+}
+
+export const VEHICLES = CARS.map(buildVehicle);
+
+// Normalized stat values (0..1) for the garage's little bars.
 export const STAT_BARS = {
-  speed: norm('maxSpeed'),
-  accel: norm('accel'),
-  grip: norm('turnRate'),
+  speed: Ntop,
+  accel: CARS.map((_, i) => 1 - Na[i]), // a: low = fast → bar high
+  grip: Nhd,
 };

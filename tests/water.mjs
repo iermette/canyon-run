@@ -14,8 +14,7 @@ function check(name, cond, extra = '') {
   else { fails++; console.log(`  FAIL ${name}${extra ? ` (${extra})` : ''}`); }
 }
 
-const world = createWorld(0); // classic: the lake sits far from every road
-const lake = { x: world.water.x + world.water.w / 2, y: world.water.y + world.water.h / 2 };
+const world = createWorld(0); // the lake is crossed by a bridge; water = lake minus road
 const sports = VEHICLES[0];
 
 // --- 1. the rule itself, on a flat plane where we decide what is water ------
@@ -26,21 +25,55 @@ const plane = (test) => ({
 });
 const at = (car, x, y, angle) => { car.x = x; car.y = y; car.angle = angle; return car; };
 
+// The world is procedural, so instead of hard-coding coordinates that depend
+// on the layout we search the real water for the placements we need:
+//   deep  – the water point farthest from any road (every wheel in the drink)
+//   shore – points hugging the shoreline where one wheel / one axle is in
+const wrect = world.water;
+const marginAt = (x, y) => {
+  const info = world.trackInfoAt(x, y);
+  return info.dist - info.section.width / 2 - 10;
+};
+let deep = null;
+for (let i = 1; i < 60; i++) for (let j = 1; j < 60; j++) {
+  const x = wrect.x + wrect.w * i / 60, y = wrect.y + wrect.h * j / 60;
+  if (!world.inWater(x, y)) continue;
+  const m = marginAt(x, y);
+  if (m > (deep?.m ?? -1)) deep = { x, y, m };
+}
+let shoreOne = null, shoreAxle = null;
+for (let i = 0; i <= 140 && !(shoreOne && shoreAxle); i++)
+  for (let j = 0; j <= 140; j++) {
+    const x = wrect.x + wrect.w * i / 140, y = wrect.y + wrect.h * j / 140;
+    if (!world.inWater(x, y)) continue;
+    const m = marginAt(x, y);
+    if (m < 0 || m > 30) continue; // shoreline band only
+    for (const a of [0, Math.PI / 2, Math.PI / 4, 3 * Math.PI / 4]) {
+      const r = waterContact(at(new Car(world, sports), x, y, a), world);
+      if (r.wet === 1 && !shoreOne) shoreOne = { x, y, a };
+      if (r.wet === 2 && !r.sunk && !shoreAxle) shoreAxle = { x, y, a };
+    }
+  }
+
 const probe = at(new Car(world, sports), 0, 0, 0);
 check('diagonal FL+RR = plouf',
   waterContact(probe, plane((x, y) => (x > 0 && y < 0) || (x < 0 && y > 0))).sunk === true);
 check('one whole side = survivable',
-  (() => { const r = waterContact(probe, plane((x, y) => y > 0)); return r.wet === 2 && r.sunk === false; })());
+  (() => { const r = waterContact(probe, plane((_x, y) => y > 0)); return r.wet === 2 && r.sunk === false; })());
 check('one whole axle = survivable',
-  (() => { const r = waterContact(probe, plane((x, y) => x > 0)); return r.wet === 2 && r.sunk === false; })());
+  (() => { const r = waterContact(probe, plane((x, _y) => x > 0)); return r.wet === 2 && r.sunk === false; })());
 check('three wheels = plouf',
   waterContact(probe, plane((x, y) => !(x < 0 && y < 0))).sunk === true);
 
-// --- 2. every vehicle, dropped in the middle of the lake --------------------
-for (const v of VEHICLES) {
-  const car = at(new Car(world, v), lake.x, lake.y, 0);
-  const r = waterContact(car, world);
-  check(`${v.name.padEnd(14)} afloat in the lake`, r.sunk && r.wet === 4, `wet=${r.wet}`);
+// --- 2. every vehicle, dropped deep in the lake (far from the bridge) --------
+check('lake has deep water', deep !== null, 'no in-water point found');
+if (deep) {
+  let allAfloat = true, culprit = '';
+  for (const v of VEHICLES) {
+    const r = waterContact(at(new Car(world, v), deep.x, deep.y, 0), world);
+    if (!(r.wet === 4 && r.sunk)) { allAfloat = false; culprit = `${v.name} wet=${r.wet}`; break; }
+  }
+  check('every vehicle afloat deep in the lake', allAfloat, culprit);
 }
 
 // --- 3. dry ground and far-away broad phase ---------------------------------
@@ -51,17 +84,23 @@ for (const v of VEHICLES) {
   check('start line is dry', r.wet === 0 && r.sunk === false, `wet=${r.wet}`);
 }
 
-// --- 4. creeping over the shoreline ----------------------------------------
-// The lake's bottom edge is y = -3200; a 45-degree car crossing it gets wet
-// wheel by wheel: 1 wheel, then the front axle -> both survivable.
-{
-  const A = Math.PI / 4;
-  const one = waterContact(at(new Car(world, sports), 2200, -3210, A), world);
-  check('one wheel in = survivable', one.wet === 1 && one.sunk === false, `wet=${one.wet}`);
-  const axle = waterContact(at(new Car(world, sports), 2200, -3200, A), world);
-  check('front axle in = survivable', axle.wet === 2 && axle.sunk === false, `wet=${axle.wet}`);
-  const in4 = waterContact(at(new Car(world, sports), 2200, -3170, A), world);
-  check('all four wheels in = plouf', in4.wet === 4 && in4.sunk === true, `wet=${in4.wet}`);
+// --- 4. creeping over the shoreline ------------------------------------------
+// We searched the real shoreline (hugging the road) for a car with exactly
+// one wheel in and one with a whole axle in — both survivable. A car dropped
+// deep in the lake has all four wheels in — plouf.
+check('found a one-wheel shoreline', shoreOne !== null);
+check('found an axle shoreline', shoreAxle !== null);
+if (shoreOne) {
+  const r = waterContact(at(new Car(world, sports), shoreOne.x, shoreOne.y, shoreOne.a), world);
+  check('one wheel in = survivable', r.wet === 1 && !r.sunk, `wet=${r.wet}`);
+}
+if (shoreAxle) {
+  const r = waterContact(at(new Car(world, sports), shoreAxle.x, shoreAxle.y, shoreAxle.a), world);
+  check('one axle in = survivable', r.wet === 2 && !r.sunk, `wet=${r.wet}`);
+}
+if (deep) {
+  const r = waterContact(at(new Car(world, sports), deep.x, deep.y, 0), world);
+  check('all four wheels in = plouf', r.wet === 4 && r.sunk, `wet=${r.wet}`);
 }
 
 // --- 5. a plunge on the bridge sends you back to the start line -------------

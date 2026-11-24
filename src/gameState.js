@@ -85,6 +85,7 @@ export class GameState {
         this.finish();
       }
     } else if (this.state === State.CRASHED) {
+      this.time += dt; // the race clock keeps running through the swim/respawn
       this.crashTimer -= dt;
       if (this.crashKind === 'splash') {
         this.car.sinking = clamp((SPLASH_RESET_DELAY - this.crashTimer) / SINK_SECONDS, 0, 1);

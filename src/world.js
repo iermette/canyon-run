@@ -1,5 +1,6 @@
 import { clamp, lerp, closestPointOnSegment, roundRectPath } from './utils.js';
 import { generateTrack, mulberry32 } from './trackgen.js';
+import { grassStyle, roadStyle } from './textures.js';
 
 // Classic hand-crafted track (seed 0). Centerline waypoints in world units.
 const CLASSIC_WAYPOINTS = [
@@ -277,7 +278,8 @@ function drawScene(ctx, world, vw, vh) {
     x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y);
   }
   const m = Math.max(900, Math.hypot(vw || 1920, vh || 1080) / 2 + 400);
-  ctx.fillStyle = '#3f7d3a';
+  // grass field: the 8-bit tile once loaded, else the flat fallback color
+  ctx.fillStyle = grassStyle('#3f7d3a');
   ctx.fillRect(x0 - m, y0 - m, (x1 - x0) + 2 * m, (y1 - y0) + 2 * m);
 
   // water under the bridge
@@ -315,7 +317,8 @@ function drawScene(ctx, world, vw, vh) {
     }
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.strokeStyle = chunk.color;
+    // asphalt sections wear the texture; tunnel road and wooden bridge stay flat
+    ctx.strokeStyle = (chunk.name === 'OPEN' || chunk.name === 'FINISH') ? roadStyle(chunk.color) : chunk.color;
     ctx.lineWidth = chunk.width;
     strokePath(ctx, chunk.pts);
     // dashed center line

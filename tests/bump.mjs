@@ -9,8 +9,8 @@ function check(cond, label) {
   else { failures++; console.error(`  FAIL ${label}`); }
 }
 
-const me = VEHICLES.find((v) => v.id === 'sports');   // one circle, r=15
-const van = VEHICLES.find((v) => v.id === 'firetruck'); // tail circle at dx=-18, r=9
+const me = VEHICLES.find((v) => v.id === 'ferrari-288-gto'); // single-circle nose car
+const van = VEHICLES.find((v) => v.id === 'dodge-viper'); // two circles: nose + tail
 const car = { x: 0, y: 0, angle: 0, speed: 300, vehicle: me };
 const cooldowns = new Map();
 const NOW = 10000;

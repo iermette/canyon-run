@@ -14,13 +14,13 @@ function ok(cond, msg) {
 }
 
 const world = createWorld(0); // classic hand-made track
-const sports = VEHICLES.find((v) => v.id === 'sports');
-const taxi = VEHICLES.find((v) => v.id === 'taxi');
+const sports = VEHICLES.find((v) => v.id === 'mclaren-f1');
+const taxi = VEHICLES.find((v) => v.id === 'peugeot-205-gti');
 const car = new Car(world, sports);
 const startS = world.trackInfoAt(car.x, car.y).s;
 
 // One remote parked on the centerline `ahead` units past my centre.
-function aheadRemote(ahead, veh = 'taxi', extra) {
+function aheadRemote(ahead, veh = 'peugeot-205-gti', extra) {
   const remotes = new Remotes();
   remotes.setMeta('A', { name: 'A', color: '#fff', vehicleId: veh });
   const p = pointAt(world.cl, startS + ahead);
@@ -48,7 +48,7 @@ const now = performance.now();
 }
 { // two cars ahead: the closest one is the target
   const r = aheadRemote(150, 'taxi', (rr) => {
-    rr.setMeta('B', { name: 'B', vehicleId: 'bus' });
+    rr.setMeta('B', { name: 'B', vehicleId: 'dodge-viper' });
     const p = pointAt(world.cl, startS + 300);
     rr.update('B', { x: p.x, y: p.y, a: p.angle, s: startS + 300 });
   });
