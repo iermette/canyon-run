@@ -57,6 +57,7 @@ net.on('disconnect', () => {
 });
 
 net.on('lobby', (m) => {
+  if (phase === 'scoring') { phase = 'garage'; scoreData = null; } // "next": back to the menu
   if (phase !== 'garage') return; // ignore lobby updates mid-round
   myId = m.you;
   finishedTimes.clear();
@@ -127,6 +128,23 @@ net.on('push', (m) => {
   }
 });
 
+// ---- synchronized round end (mp) -------------------------------------------------
+// The first car across the line starts a 15s grace (late racers can still cross),
+// then a synchronized 3-2-1 ends the round for EVERY screen at once, and the
+// shared scoreboard is revealed. "Suivant" (or Enter) sends 'next' to everyone.
+net.on('raceEnding', (m) => {
+  raceEndingUntil = m.graceUntil; // HUD countdown; the race keeps going for stragglers
+});
+net.on('ending', (m) => {
+  endingAt = m.endsAt;
+  raceEndingUntil = 0;
+  phase = 'ending'; // the synchronized 3-2-1 (car frozen, waiting for the scoreboard)
+});
+net.on('scoreboard', (m) => {
+  scoreData = { round: m.round, family: m.family, results: m.results, totals: m.totals };
+  phase = 'scoring'; // the shared scoreboard is up for everyone
+});
+
 // ---- game objects -------------------------------------------------------------
 let world = createWorld(); // fresh random track on load (createWorld(0) = classic)
 const car = new Car(world);
@@ -135,14 +153,19 @@ camera.snapTo(car.x, car.y);
 const input = new Input();
 const gameState = new GameState(car);
 
-let phase = 'garage'; // garage -> countdown -> racing
+let phase = 'garage'; // garage -> countdown -> racing -> ending -> scoring
 let waterWarn = false; // one wheel is already in the drink (HUD hint)
 let turboState = null; // null | 'ready' | 'on' (HUD hint, see turbo.js)
+// Synchronized round end (mp): grace deadline, 3-2-1 deadline, scoreboard data.
+let raceEndingUntil = 0; // first finish -> 15s grace for the late racers to cross
+let endingAt = 0;        // the synchronized 3-2-1 deadline (the server's 'ending')
+let scoreData = null;    // { round, family, results, totals } from the 'scoreboard'
 tryConnect();
 
 // Mouse picking in the garage: the canvas is fullscreen, so client coords are
 // already the screen-space coords the garage draws its cards in.
 canvas.addEventListener('click', (e) => {
+  if (phase === 'scoring') { net.send({ t: 'next' }); return; } // "Suivant": back to the menu
   if (phase !== 'garage' || !garage.nameDone) return;
   const action = garage.handleClick(e.clientX, e.clientY);
   if (action === 'select' && mode === 'mp') {
@@ -308,6 +331,15 @@ function frame(now) {
       if (mode === 'mp' && net.connected) net.send({ t: 'quit' });
       toGarage();
     }
+  } else if (phase === 'ending') {
+    // The synchronized 3-2-1 is up: the car is frozen and we wait for the
+    // server's 'scoreboard' (it arrives when the 3-2-1 hits zero).
+  } else if (phase === 'scoring') {
+    // The shared scoreboard is up: Enter/Space/N (or the "Suivant" click)
+    // ends the round for everyone -> the server sends the next lobby.
+    if (input.wasPressed('Enter') || input.wasPressed('Space') || input.wasPressed('KeyN')) {
+      net.send({ t: 'next' });
+    }
   }
 
   camera.update(dt, car);
@@ -328,6 +360,10 @@ function frame(now) {
 
   if (phase === 'garage') {
     garage.draw(ctx, w, h);
+  } else if (phase === 'ending') {
+    drawEndingOverlay(ctx, w, h, endingAt, now);
+  } else if (phase === 'scoring') {
+    drawScoreboard(ctx, w, h, scoreData, myId);
   } else {
     const info = world.trackInfoAt(car.x, car.y);
     let trackLabel = world.seed === 0 ? 'CLASSIC' : '#' + world.seed;
@@ -337,9 +373,129 @@ function frame(now) {
     // Speedometer (point 4): needle gauge, top-right, on every screen.
     const gR = Math.min(56, Math.max(42, h * 0.11));
     drawSpeedometer(ctx, w - gR - 22, gR + 22, gR, car.speed, { maxKmh: 500, label: 'km/h' });
+    // Grace countdown: the first car crossed the line; late racers can still cross.
+    if (raceEndingUntil > 0) drawGraceOverlay(ctx, w, raceEndingUntil, now);
   }
 
   requestAnimationFrame(frame);
+}
+
+// ---- synchronized round end: overlays -----------------------------------------
+
+// Grace countdown (phase 'racing', after the first finish): "la manche se termine
+// dans Xs". Late racers can still cross the line before the 3-2-1.
+function drawGraceOverlay(ctx, w, until, now) {
+  const left = Math.max(0, Math.ceil((until - now) / 1000));
+  if (left <= 0) return;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(0, 0, w, 44);
+  ctx.fillStyle = '#f5a623';
+  ctx.font = 'bold 18px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(`La manche se termine dans ${left}s — franchis la ligne !`, w / 2, 28);
+  ctx.restore();
+}
+
+// The synchronized 3-2-1 (phase 'ending'): a big countdown that ends for everyone
+// at the same instant (the server's 'scoreboard' arrives at zero).
+function drawEndingOverlay(ctx, w, h, endingAt, now) {
+  const remain = Math.max(0, endingAt - now);
+  const n = Math.ceil(remain / 1000); // 3, 2, 1
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.72)';
+  ctx.fillRect(0, 0, w, h);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#f5a623';
+  ctx.font = `bold ${Math.min(w, h) * 0.42}px "Courier New", monospace`;
+  ctx.fillText(n > 0 ? String(n) : 'GO !', w / 2, h / 2);
+  ctx.font = 'bold 18px "Courier New", monospace';
+  ctx.fillStyle = '#cfd6e6';
+  ctx.fillText('La manche se termine…', w / 2, h / 2 + Math.min(w, h) * 0.28);
+  ctx.restore();
+}
+
+// The shared scoreboard (phase 'scoring'): results sorted by finish order +
+// cumulative totals, for every racer in the room. "Suivant" ends the round.
+function drawScoreboard(ctx, w, h, data, meId) {
+  if (!data) return;
+  const short = (id) => { const v = vehicleById(id); return v ? v.short : '?'; };
+  ctx.save();
+  ctx.fillStyle = 'rgba(8,10,14,0.94)';
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = '#f5a623';
+  ctx.font = 'bold 26px "Courier New", monospace';
+  ctx.fillText(`${data.round === 1 ? 'MANCHE 1' : 'MANCHE ' + data.round} — CLASSEMENT`, w / 2, 52);
+  ctx.fillStyle = '#8b93a7';
+  ctx.font = '14px "Courier New", monospace';
+  ctx.fillText('trié par ordre d\'arrivée · statistiques cumulées', w / 2, 76);
+
+  const rows = data.results || [];
+  const top = 112;
+  const rowH = 38;
+  const maxRows = Math.max(1, Math.min(rows.length, Math.floor((h - top - 110) / rowH)));
+  const cols = [
+    { label: '', wFrac: 0.06 },
+    { label: 'PILOTE', wFrac: 0.30 },
+    { label: 'VOITURE', wFrac: 0.24 },
+    { label: 'TEMPS', wFrac: 0.18 },
+    { label: 'PTS', wFrac: 0.14 },
+  ];
+  const colX = [];
+  let acc = 0.05;
+  for (const c of cols) { colX.push(acc); acc += c.wFrac; }
+
+  ctx.font = 'bold 13px "Courier New", monospace';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#8b93a7';
+  cols.forEach((c, i) => { if (c.label) ctx.fillText(c.label, colX[i] * w, top - 8); });
+
+  for (let i = 0; i < maxRows; i++) {
+    const r = rows[i];
+    const y = top + i * rowH + rowH / 2;
+    const isMe = r.id === meId;
+    ctx.fillStyle = isMe ? 'rgba(245,166,35,0.14)' : (i % 2 ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.015)');
+    ctx.fillRect(0.04 * w, top + i * rowH, 0.92 * w, rowH - 2);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = r.order === 1 ? '#ffd166' : '#cfd6e6';
+    ctx.font = 'bold 16px "Courier New", monospace';
+    ctx.fillText(r.order > 0 ? String(r.order) : '·', colX[0] * w + 6, y + 6);
+    ctx.fillStyle = isMe ? '#f5a623' : '#e6ebf5';
+    ctx.font = (isMe ? 'bold ' : '') + '15px "Courier New", monospace';
+    ctx.fillText((r.name || '?') + (isMe ? '  (toi)' : ''), colX[1] * w, y + 6);
+    ctx.fillStyle = '#9aa3b7';
+    ctx.font = '14px "Courier New", monospace';
+    ctx.fillText(short(r.vehicleId), colX[2] * w, y + 6);
+    ctx.fillStyle = r.dnf ? '#7a8093' : '#cfd6e6';
+    ctx.fillText(r.time == null ? 'DNF' : r.time.toFixed(2) + 's', colX[3] * w, y + 6);
+    ctx.fillStyle = '#9aa3b7';
+    ctx.fillText(String(r.points), colX[4] * w, y + 6);
+  }
+
+  const me = data.totals ? data.totals[meId] : null;
+  if (me) {
+    ctx.fillStyle = '#8b93a7';
+    ctx.font = '13px "Courier New", monospace';
+    ctx.fillText(`Ton cumul : ${me.points} pts · ${me.wins} victoire(s) · ${me.races} course(s)`, 0.05 * w, top + maxRows * rowH + 24);
+  }
+
+  // "Suivant" button (any click / Enter also works).
+  const bw = 200, bh = 46;
+  const bx = w / 2 - bw / 2, by = h - bh - 30;
+  ctx.fillStyle = '#f5a623';
+  ctx.fillRect(bx, by, bw, bh);
+  ctx.fillStyle = '#10131a';
+  ctx.font = 'bold 18px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('SUIVANT', w / 2, by + bh / 2 + 7);
+  ctx.fillStyle = '#8b93a7';
+  ctx.font = '12px "Courier New", monospace';
+  ctx.fillText('clique (ou Entrée) — la roue retire une catégorie', w / 2, by + bh + 20);
+  ctx.restore();
 }
 
 requestAnimationFrame(frame);

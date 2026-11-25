@@ -9,7 +9,7 @@ import wsserverMod from '../server/wsserver.js';
 import roomMod from '../server/room.js';
 
 const { WsServer } = wsserverMod;
-const { Room, COUNTDOWN_MS } = roomMod;
+const { Room, COUNTDOWN_MS, ENDING_MS } = roomMod;
 
 let failures = 0;
 function check(cond, label) {
@@ -143,17 +143,41 @@ A.send({ t: 'push', id: B.id, dx: 1, dy: 0, v: 1e9 });
 const gotClamped = await B.next((m) => m.t === 'push');
 check(gotClamped.v === 500, `absurd push velocity clamped by the server (v=${gotClamped.v})`);
 
-// ---- finishes -> back to lobby ---------------------------------------------------
+// ---- finishes -> synchronized round end -> shared scoreboard -------------------
+[A, B, C].forEach((c) => c.clear());
 A.send({ t: 'finish', time: 42.5 });
 const finB = await B.next((m) => m.t === 'finished' && m.id === A.id);
-check(finB.time === 42.5, `finish broadcast with Alice's time (${finB.time})`);
+check(finB.time === 42.5 && finB.order === 1 && finB.points === 10, `1st finish broadcast (time=${finB.time}, order=${finB.order}, points=${finB.points})`);
+// The first crossing starts the synchronized 15s grace on every screen.
+const endingMsg = await A.next((m) => m.t === 'raceEnding');
+check(endingMsg.graceUntil > Date.now(), 'first finish starts the grace period (raceEnding)');
 
 B.send({ t: 'finish', time: 43.1 });
 C.send({ t: 'quit' }); // Carol abandons instead of finishing
-const lobbyA = await A.next((m) => m.t === 'lobby' && m.phase === 'lobby');
-check(lobbyA.players.length === 3, 'everyone back in the lobby after the round ends');
-check(room.seed !== cd[0].seed, `next round gets a fresh seed (${cd[0].seed} -> ${room.seed})`);
+// Everyone done -> the synchronized 3-2-1 starts immediately (no waiting).
+const endMsg = await A.next((m) => m.t === 'ending');
+check(endMsg.endsAt > Date.now(), 'all-done triggers the synchronized 3-2-1 (ending)');
+
+// Wait out the 3-2-1: the round ends for everyone at once -> shared scoreboard.
+const board = await A.next((m) => m.t === 'scoreboard', ENDING_MS + 4000);
+check(board.results.length === 3, `scoreboard lists all 3 racers (${board.results.length})`);
+const byId = Object.fromEntries(board.results.map((r) => [r.id, r]));
+check(byId[A.id].order === 1 && byId[B.id].order === 2, 'scoreboard sorted by finish order');
+check(byId[C.id].dnf === true, 'abandoning racer marked DNF');
+check(board.totals[A.id].points >= 10 && board.totals[A.id].wins === 1, 'cumulative totals updated for the winner');
+// B sees the SAME shared scoreboard.
+const boardB = await B.next((m) => m.t === 'scoreboard');
+check(JSON.stringify(boardB.results) === JSON.stringify(board.results), 'B sees the same shared scoreboard');
+
+// ---- "next": everyone back to the menu, wheel removes a category ---------------
+const prevFamily = room.family;
+const prevSeed = room.seed;
+A.send({ t: 'next' });
+const lobbyA = await B.next((m) => m.t === 'lobby' && m.phase === 'lobby');
+check(lobbyA.players.length === 3, 'everyone back in the lobby after "next"');
+check(room.seed !== prevSeed, `next round gets a fresh seed (${prevSeed} -> ${room.seed})`);
 check(lobbyA.players.every((p) => p.ready === false), 'ready flags reset for the next round');
+check(lobbyA.family !== prevFamily, `wheel turned to a new category (${prevFamily} -> ${lobbyA.family})`);
 
 // ---- ghost cleanup (silent death) ---------------------------------------------------
 // A peer that completes the WS handshake and then goes silent (killed browser):
