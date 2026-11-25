@@ -353,17 +353,20 @@ function drawScene(ctx, world, vw, vh) {
     ctx.restore();
   }
 
-  // checkered finish line
+  // checkered finish line — a band spanning the full road width
   {
     const p = pointAt(world.cl, world.finishS);
-    const halfW = 80;
+    const finishSec = world.sections.find((s) => s.name === 'FINISH');
+    const W = finishSec.width;
+    const rows = Math.max(2, Math.round(W / 16));
+    const cw = W / rows; // cell size so the band spans the road exactly
     ctx.save();
     ctx.translate(p.x, p.y);
     ctx.rotate(p.angle);
-    for (let i = 0; i < 10; i++) {
-      for (let j = -1; j <= 1; j++) {
-        ctx.fillStyle = (i + j + 2) % 2 === 0 ? '#f4f4f4' : '#15181d';
-        ctx.fillRect(-halfW + i * 16, j * 16 - 8, 16, 16);
+    for (let i = 0; i < 2; i++) {
+      for (let j = 0; j < rows; j++) {
+        ctx.fillStyle = (i + j) % 2 === 0 ? '#f4f4f4' : '#15181d';
+        ctx.fillRect(-cw + i * cw, -W / 2 + j * cw, cw, cw);
       }
     }
     ctx.restore();
