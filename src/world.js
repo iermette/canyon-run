@@ -1,6 +1,6 @@
 import { clamp, lerp, closestPointOnSegment, roundRectPath } from './utils.js';
 import { generateTrack, mulberry32 } from './trackgen.js';
-import { grassStyle, roadStyle } from './textures.js';
+import { grassStyle, roadStyle, treeSprites } from './textures.js';
 
 // Classic hand-crafted track (seed 0). Centerline waypoints in world units.
 const CLASSIC_WAYPOINTS = [
@@ -111,11 +111,23 @@ function label(ctx, text, x, y) {
 }
 
 function drawTrees(ctx, trees) {
-  for (const [x, y, r] of trees) {
-    ctx.fillStyle = '#2c5e2a';
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#38793a';
-    ctx.beginPath(); ctx.arc(x - r * 0.15, y - r * 0.15, r * 0.62, 0, Math.PI * 2); ctx.fill();
+  const sprites = treeSprites();
+  for (const [x, y, r, variant] of trees) {
+    if (sprites.length > 0) {
+      const img = sprites[((variant ?? 0) % sprites.length + sprites.length) % sprites.length];
+      // offset shadow under the canopy: sells the tree's height
+      ctx.fillStyle = 'rgba(6,10,6,0.30)';
+      ctx.beginPath();
+      ctx.ellipse(x + r * 0.22, y + r * 0.28, r * 1.02, r * 0.9, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.drawImage(img, x - r, y - r, r * 2, r * 2);
+    } else {
+      // flat fallback until the sprites are loaded (and if the files are missing)
+      ctx.fillStyle = '#2c5e2a';
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#38793a';
+      ctx.beginPath(); ctx.arc(x - r * 0.15, y - r * 0.15, r * 0.62, 0, Math.PI * 2); ctx.fill();
+    }
   }
 }
 
@@ -242,7 +254,7 @@ function makeTrees(cl, sections, water, rnd) {
     if (info.dist < info.section.width / 2 + 90) continue; // keep clear of the road
     if (x > water.x - 50 && x < water.x + water.w + 50 &&
         y > water.y - 50 && y < water.y + water.h + 50) continue; // not in the water
-    trees.push([x, y, 20 + rnd() * 14]);
+    trees.push([x, y, 20 + rnd() * 14, Math.floor(rnd() * 3)]); // 4th: sprite variant
   }
   return trees;
 }
@@ -401,9 +413,9 @@ function buildClassicWorld(opts) {
   const water = makeWater(chunks);
   const tunnelCenter = pointAt(cl, 3600);
   const trees = [
-    [80, 260, 26], [420, 330, 30], [760, 250, 24], [300, -360, 26],
-    [1500, -260, 28], [2050, -420, 24],
-    [4950, -950, 26], [5900, -1700, 26], [6600, -2050, 26],
+    [80, 260, 26, 0], [420, 330, 30, 1], [760, 250, 24, 2], [300, -360, 26, 1],
+    [1500, -260, 28, 0], [2050, -420, 24, 2],
+    [4950, -950, 26, 1], [5900, -1700, 26, 0], [6600, -2050, 26, 2],
   ];
 
   return {
