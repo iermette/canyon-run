@@ -11,6 +11,7 @@ import { Garage } from './garage.js';
 import { Net } from './net.js';
 import { Remotes } from './remotes.js';
 import { loadTextures } from './textures.js';
+import { drawSpeedometer } from './speedometer.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -92,6 +93,7 @@ net.on('countdown', (m) => {
   // show the same sprite for every player (startRace() only covers solo).
   const me = m.players.find((pl) => pl.id === myId);
   car.setVehicle(vehicleById(me ? me.vehicleId : garage.selected.id));
+  car.resetNOS(); // fresh NOS packs each race (point 2)
   phase = 'countdown';
   gameState.beginCountdown(m.duration / 1000, true); // synced: the server's 'go' ends it
   camera.snapTo(car.x, car.y);
@@ -148,6 +150,7 @@ canvas.addEventListener('click', (e) => {
 
 function startRace() {
   car.setVehicle(garage.selected);
+  car.resetNOS(); // fresh NOS packs each race (point 2)
   phase = 'countdown';
   gameState.reset(); // local checkered countdown, then GO
   camera.snapTo(car.x, car.y);
@@ -215,6 +218,14 @@ function frame(now) {
   } else if (phase === 'racing') {
     waterWarn = false;
     turboState = null;
+    // Signals + headlight (point 3): X left, C flash, V right. Held keys are
+    // set every frame; the headlight flash is a single press.
+    car.turnLeft = input.isDown('KeyX');
+    car.turnRight = input.isDown('KeyV');
+    if (input.wasPressed('KeyC')) car.flashHeadlights();
+    // NOS (point 2): F fires one of two packs; steering near-locked while it
+    // fires, so it's only safe on a straight. Player's call, no refusal.
+    if (gameState.state === State.PLAYING && input.wasPressed('KeyF')) car.nos.activate();
     if (gameState.state === State.PLAYING) {
       // Turbo: hold Space while a car is ahead on the track; it cuts off
       // when our nose comes level with theirs (chaseTarget goes null).
@@ -281,7 +292,7 @@ function frame(now) {
     // N/C: solo only — in mp the track is shared and server-assigned.
     if (mode !== 'mp') {
       if (input.wasPressed('KeyN')) switchWorld(createWorld());
-      else if (input.wasPressed('KeyC')) switchWorld(createWorld(0));
+      else if (input.wasPressed('KeyT')) switchWorld(createWorld(0));
     }
 
     // G: back to the garage. In mp this abandons the race for me only.
@@ -315,6 +326,9 @@ function frame(now) {
     if (wasMp && !net.connected) trackLabel += ' · CONN LOST'; // was mp, dropped mid-race
     gameState.drawHUD(ctx, w, h, info.section.name, isOffTrack(info),
       trackLabel, car.vehicle.short, myPositionLabel(), waterWarn, turboState);
+    // Speedometer (point 4): needle gauge, top-right, on every screen.
+    const gR = Math.min(56, Math.max(42, h * 0.11));
+    drawSpeedometer(ctx, w - gR - 22, gR + 22, gR, car.speed, { maxKmh: 500, label: 'km/h' });
   }
 
   requestAnimationFrame(frame);

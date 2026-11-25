@@ -103,7 +103,7 @@ export class GameState {
     ctx.textBaseline = 'alphabetic';
     const lines = [
       'Controls: W/Up gas - S/Down brake/reverse',
-      'A/D or Left/Right to steer - Space turbo  ·  N new track / C classic / G garage',
+      'A/D or Left/Right steer · Space turbo · F NOS · X/C/V lights · N new · T classic · G garage',
       `TIME ${this.time.toFixed(1)}s   SECTION ${sectionName}${trackLabel ? `   TRACK ${trackLabel}` : ''}${vehicleLabel ? `   VEHICLE ${vehicleLabel}` : ''}${posLabel ? `   ${posLabel}` : ''}`, 
     ];
     // warnings get their own colour (the drink one outranks plain off-track)

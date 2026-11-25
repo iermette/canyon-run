@@ -2,6 +2,8 @@ import { clamp } from './utils.js';
 import { VEHICLES } from './vehicles.js';
 import { TURBO_MAX_MULT, TURBO_ACCEL_MULT } from './turbo.js';
 import { KNOCK_TAU } from './bump.js';
+import { NOS, NOS_ACCEL_MULT, NOS_CAP_MULT, NOS_STEER_MULT } from './nos.js';
+import { driftTarget } from './drift.js';
 
 const DRAG = 1.4;           // proportional drag, per second
 const ROLL_FRICTION = 70;   // rolling resistance with no input, units/s^2
@@ -11,6 +13,13 @@ export class Car {
   constructor(world, vehicle = VEHICLES[0]) {
     this.world = world;
     this.vehicle = vehicle;
+    this.nos = new NOS();       // two charges per race (point 2)
+    this.drift = 0;             // 0..1 current slide amount (point 5)
+    this.latV = 0;              // outward lateral slide velocity, u/s
+    this.braking = false;       // brake applied (rear lights) — point 6
+    this.turnLeft = false;      // left turn signal held (X) — point 3
+    this.turnRight = false;     // right turn signal held (V) — point 3
+    this.flashTimer = 0;        // headlight flash remaining, s (C) — point 3
     this.reset();
   }
 
@@ -27,7 +36,19 @@ export class Car {
     this.sinking = 0; // 0..1, set by the splash reset (the car slips under)
     this.knockX = 0;  // shove from a car bump (see bump.js), decays in update
     this.knockY = 0;
+    this.drift = 0;
+    this.latV = 0;
+    this.braking = false;
+    this.turnLeft = false;
+    this.turnRight = false;
+    this.flashTimer = 0;
   }
+
+  // Restore the two NOS charges for a fresh race (called by main.js at start).
+  resetNOS() { this.nos = new NOS(); }
+
+  // Trigger the headlight flash for `duration` seconds (point 3, key C).
+  flashHeadlights(duration = 1.2) { this.flashTimer = Math.max(this.flashTimer, duration); }
 
   get dirX() { return Math.cos(this.angle); }
   get dirY() { return Math.sin(this.angle); }
@@ -42,37 +63,52 @@ export class Car {
   update(dt, drive) {
     const s = this.vehicle.stats;
     const turbo = !!drive.turbo; // catching a car ahead (see turbo.js)
-    if (drive.throttle > 0) this.speed += s.accel * (turbo ? TURBO_ACCEL_MULT : 1) * dt;
+    const nos = this.nos.active; // NOS injection firing (see nos.js)
+    const braking = drive.throttle < 0 && this.speed > 5; // forward + brake
+
+    // ---- longitudinal (NOS multiplies the acceleration, point 2) ----
+    const accelMult = (turbo ? TURBO_ACCEL_MULT : 1) * (nos ? NOS_ACCEL_MULT : 1);
+    if (drive.throttle > 0) this.speed += s.accel * accelMult * dt;
     else if (drive.throttle < 0) this.speed -= s.brake * dt;
     else this.speed -= Math.sign(this.speed) * Math.min(Math.abs(this.speed), ROLL_FRICTION * dt);
 
     this.speed -= this.speed * DRAG * dt; // drag always opposes motion
 
-    const cap = turbo ? s.maxSpeed * TURBO_MAX_MULT : s.maxSpeed;
+    // ---- ceiling: NOS > turbo > stock (hard while boosting, ease on cut-off) ----
+    const cap = nos ? s.maxSpeed * NOS_CAP_MULT : turbo ? s.maxSpeed * TURBO_MAX_MULT : s.maxSpeed;
     if (this.speed > cap) {
-      if (turbo) {
-        // While boosting the ceiling is a hard limit: the boost is meant to
-        // hold the top speed, never to overshoot it (high-accel cars would
-        // otherwise sit a few % above the cap with a soft ceiling).
-        this.speed = cap;
-      } else {
-        // Turbo cut-off (or off-road overshoot): ease back to the lower
-        // ceiling, no hard jump down when the boost ends.
-        this.speed += (cap - this.speed) * Math.min(1, 3 * dt);
-      }
+      if (nos || turbo) this.speed = cap; // boost holds its ceiling, never overshoots
+      else this.speed += (cap - this.speed) * Math.min(1, 3 * dt); // soft ease back
     } else {
       this.speed = clamp(this.speed, s.reverseMax, cap);
     }
 
-    // Steering only bites at speed and inverts while reversing.
-    const grip = clamp(Math.abs(this.speed) / GRIP_SPEED, 0, 1) * (this.speed < 0 ? -1 : 1);
-    this.angle += drive.steer * s.turnRate * grip * dt;
+    // ---- drift / slide when the corner is entered too fast (point 5) ----
+    const target = driftTarget({ speed: this.speed, steer: drive.steer, turnRate: s.turnRate, braking });
+    this.drift += (target - this.drift) * Math.min(1, 6 * dt);
+    if (this.drift < 0.001) this.drift = 0;
+    // outward lateral slide builds while drifting and decays when it stops
+    const slide = this.drift * Math.abs(this.speed) * 0.5 * (drive.steer >= 0 ? -1 : 1);
+    this.latV += (slide - this.latV) * Math.min(1, 5 * dt);
+    if (Math.abs(this.latV) < 0.4) this.latV = 0;
 
+    // ---- steering: understeers while sliding, nearly locked under NOS ----
+    const grip = clamp(Math.abs(this.speed) / GRIP_SPEED, 0, 1) * (this.speed < 0 ? -1 : 1);
+    const steerEff = (1 - 0.5 * this.drift) * (nos ? NOS_STEER_MULT : 1);
+    this.angle += drive.steer * s.turnRate * grip * steerEff * dt;
+
+    // ---- knockback decay + integrate (heading + lateral slide) ----
     const decay = Math.exp(-dt / KNOCK_TAU); // the shove fades out quickly
     this.knockX *= decay;
     this.knockY *= decay;
-    this.x += (this.dirX * this.speed + this.knockX) * dt;
-    this.y += (this.dirY * this.speed + this.knockY) * dt;
+    const lat = this.latV || 0;
+    this.x += (this.dirX * this.speed + this.knockX - Math.sin(this.angle) * lat) * dt;
+    this.y += (this.dirY * this.speed + this.knockY + Math.cos(this.angle) * lat) * dt;
+
+    // ---- timers + light state for the painter ----
+    this.nos.update(dt);
+    if (this.flashTimer > 0) this.flashTimer = Math.max(0, this.flashTimer - dt);
+    this.braking = braking;
   }
 
   // Heavy slowdown when off the road surface (grass, water, tunnel walls).
@@ -102,7 +138,13 @@ export class Car {
     }));
   }
 
-  draw(ctx) {
+  // Rear-wheel world positions — where the drift smoke is emitted from.
+  rearWheels() {
+    const pts = this.wheelContacts();
+    return [pts[2], pts[3]];
+  }
+
+  draw(ctx, now = 0) {
     ctx.save();
     ctx.translate(this.x, this.y);
     ctx.rotate(this.angle);
@@ -111,7 +153,13 @@ export class Car {
       ctx.globalAlpha = Math.max(0, 1 - 1.15 * this.sinking);
       ctx.scale(k, k);
     }
-    this.vehicle.draw(ctx);
+    this.vehicle.draw(ctx, {
+      braking: this.braking,
+      turnLeft: this.turnLeft,
+      turnRight: this.turnRight,
+      flash: this.flashTimer > 0,
+      nos: this.nos.active,
+    }, now);
     ctx.restore();
   }
 }

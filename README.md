@@ -103,17 +103,23 @@ mode and keeps retrying.
 | Key | Action |
 | --- | ------ |
 | `W` / `Up` | accelerate |
-| `S` / `Down` | brake / reverse |
+| `S` / `Down` | brake / reverse — the tail lights come on while held |
 | `A`, `D` or `Left`, `Right` | steer |
 | `Space` (held, mid-race) | turbo while behind another racer — cuts off when your noses are level |
+| `F` | NOS injection — 2 per race, a violent short boost that locks steering (use on straights!) |
+| `X` | left turn signal |
+| `V` | right turn signal |
+| `C` | headlight flash (appel de phare) |
 | Rear-end contact | shove the racer you hit along the collision vector (multiplayer) |
 | `R` or `Space` | back to the garage (after finishing) |
 | `G` | back to the garage (mid-race; in mp you leave the round alone) |
 | `N` | new random track (solo only — in mp the track is shared) |
-| `C` | classic hand-crafted track (solo only) |
+| `T` | classic hand-crafted track (solo only) |
 
-In the **garage**: arrows/WASD move the selection, `R` picks a random vehicle,
-`ENTER` starts the race (solo) or ready-up / start-for-everyone (multiplayer).
+In the **garage**: a roulette first draws one of **five speed families** (Éco →
+Hypercars); only the cars of that family are selectable. Then arrows/WASD move
+the selection, `R` picks a random vehicle, and `ENTER` starts the race (solo) or
+ready-up / start-for-everyone (multiplayer).
 Turbo only arms when another racer is ahead on the road — in practice that
 means multiplayer, since solo races have no other cars.
 

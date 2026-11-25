@@ -1,5 +1,7 @@
 import { VEHICLES, STAT_BARS } from './vehicles.js';
 import { roundRectPath } from './utils.js';
+import { FAMILIES, FAMILY_NAMES, FAMILY_COLORS, pickFamilyIndex, Roulette } from './families.js';
+import { drawSpeedometer } from './speedometer.js';
 
 const BAR_KEYS = ['speed', 'accel', 'grip'];
 const BAR_LABELS = ['SPD', 'ACC', 'GRIP'];
@@ -83,7 +85,27 @@ export class Garage {
     this.thumbCache = new Map();
     this.reduceMotion = (typeof matchMedia === 'function') && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+    // Fairness roulette (point 1): before the picker, a wheel draws one of the
+    // 5 speed families; only that family's cars are selectable. Re-spun on every
+    // entry to the garage via resetWheel() (main.js toGarage).
+    this.spin = new Roulette(FAMILIES.length);
+    this.spinStarted = false;
+    this.spinDone = false;
+    this.wheelDone = false;
+    this.drawnFamily = null; // index into FAMILIES once the wheel stops
+
     // Build the initial (unfiltered) list so the picker is never empty on entry.
+    this.rebuild();
+  }
+
+  // Re-arm the roulette so a fresh family is drawn each time we enter the garage.
+  resetWheel() {
+    this.spin = new Roulette(FAMILIES.length);
+    this.spinStarted = false;
+    this.spinDone = false;
+    this.wheelDone = false;
+    this.drawnFamily = null;
+    this.cursor = 0;
     this.rebuild();
   }
 
@@ -108,7 +130,12 @@ export class Garage {
   // the new filter, otherwise falls back to the first row.
   rebuild(keepSelection = true) {
     const q = this.query.trim().toLowerCase();
+    // Family constraint (point 1): once the roulette has drawn a family, only
+    // that family's cars are selectable. Region + search sub-filter within it.
+    const fam = this.drawnFamily;
+    const famIds = fam !== null ? new Set(FAMILIES[fam].vehicles.map((v) => v.id)) : null;
     const keep = (v) =>
+      (famIds === null || famIds.has(v.id)) &&
       (this.region === 'ALL' || v.region === this.region) &&
       (!q || v.name.toLowerCase().includes(q) || v.short.toLowerCase().includes(q));
     const list = VEHICLES.filter(keep).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
@@ -152,6 +179,7 @@ export class Garage {
 
   update(input) {
     if (!this.nameDone) return this.updateNameScreen(input);
+    if (!this.wheelDone) return this.updateWheel(input);
     this.tick();
     const N = this.list.length;
     if (!N) return null;
@@ -203,6 +231,35 @@ export class Garage {
     this.mapPulse += dt;
     this.hoverEase = lerp(this.hoverEase, this.hoverRow >= 0 ? 1 : 0, Math.min(1, dt * 14));
     this.scrollY = lerp(this.scrollY, this.scrollTarget, Math.min(1, dt * 14));
+  }
+
+  // Roulette screen (point 1): the wheel spins, lands on a family, then waits
+  // for ENTER/click to proceed to the picker (where only that family is selectable).
+  updateWheel(input) {
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - (this._lastNow || now)) / 1000);
+    this._lastNow = now;
+    if (!this.spinStarted) {
+      this.spinStarted = true;
+      this.spin.spin(pickFamilyIndex());
+    }
+    const confirm = input.wasPressed('Enter') || input.wasPressed('NumpadEnter') || input.wasPressed('Space');
+    if (confirm && this.spin.spinning) this.spin.t = this.spin.dur; // fast-forward this frame
+    const r = this.spin.update(dt);
+    if (r !== null && !this.spinDone) {
+      this.spinDone = true;
+      this.drawnFamily = r;
+      this.cursor = 0;
+      this.lastPreviewId = null;
+      this.previewT = 0;
+      this.rebuild();
+      return null; // stay on the wheel and show the result
+    }
+    if (this.spinDone && confirm) {
+      this.wheelDone = true;
+      return 'family'; // main.js may echo the drawn family to the room
+    }
+    return null;
   }
 
   // Name entry screen: type characters, BackSpace deletes, ENTER confirms.
@@ -287,10 +344,91 @@ export class Garage {
       ctx.fillStyle = 'rgba(232,237,244,0.7)';
       ctx.fillText('Other players will see this name in the lobby and on track', w / 2, by + bh + 68);
     }
+
+    // Speed gauge (point 4) — present on every screen, top-right.
+    this.drawGauge(ctx, w, h);
+  }
+
+  // Speed gauge (point 4): a small needle gauge in the top-right, on every screen.
+  drawGauge(ctx, w, h) {
+    const v = this.selected;
+    const R = Math.min(54, Math.max(40, h * 0.1));
+    const cx = w - R - 22, cy = R + 22;
+    // Fixed 0–500 scale (matches the racing HUD); the needle sits at the
+    // selected car's top speed, so the picker previews how fast it is.
+    const topKmh = v && v.stats && v.stats.maxSpeed ? v.stats.maxSpeed : 0;
+    drawSpeedometer(ctx, cx, cy, R, topKmh, { maxKmh: 500, label: 'km/h' });
+  }
+
+  // Roulette wheel (point 1): the fairness draw before the picker.
+  drawWheel(ctx, w, h) {
+    this.drawBackdrop(ctx, w, h);
+    const cx = w / 2, cy = h / 2 - 14;
+    const R = Math.min(w, h) * 0.26;
+    const seg = (Math.PI * 2) / FAMILIES.length;
+
+    for (let f = 0; f < FAMILIES.length; f++) {
+      const a0 = -Math.PI / 2 + this.spin.angle + f * seg;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, R, a0, a0 + seg);
+      ctx.closePath();
+      ctx.globalAlpha = 0.88;
+      ctx.fillStyle = FAMILY_COLORS[f];
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(10,14,22,0.9)';
+      ctx.stroke();
+      const am = a0 + seg / 2;
+      ctx.save();
+      ctx.translate(cx + Math.cos(am) * R * 0.62, cy + Math.sin(am) * R * 0.62);
+      ctx.rotate(am + Math.PI / 2);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = '700 13px system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(10,14,22,0.92)';
+      ctx.fillText(FAMILY_NAMES[f], 0, 0);
+      ctx.restore();
+    }
+    ctx.beginPath(); ctx.arc(cx, cy, R * 0.13, 0, Math.PI * 2);
+    ctx.fillStyle = '#161b24'; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = '#ffd23e'; ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - R - 16);
+    ctx.lineTo(cx - 11, cy - R + 8);
+    ctx.lineTo(cx + 11, cy - R + 8);
+    ctx.closePath();
+    ctx.fillStyle = '#ffd23e'; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(10,14,22,0.9)'; ctx.stroke();
+
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '800 32px system-ui, sans-serif';
+    ctx.lineWidth = 7; ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.strokeText('FAIRNESS DRAW', cx, cy - R - 46);
+    ctx.fillStyle = '#fff'; ctx.fillText('FAIRNESS DRAW', cx, cy - R - 46);
+    ctx.font = '500 14px system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(232,237,244,0.75)';
+    ctx.fillText('A class is drawn at random — only its cars are selectable', cx, cy - R - 24);
+    if (this.spin.spinning) {
+      ctx.font = '600 17px system-ui, sans-serif';
+      ctx.fillStyle = '#ffd23e';
+      ctx.fillText('Spinning…', cx, cy + R + 34);
+    } else if (this.drawnFamily !== null) {
+      const fam = FAMILIES[this.drawnFamily];
+      ctx.font = '700 21px system-ui, sans-serif';
+      ctx.fillStyle = fam.color;
+      ctx.fillText(`You drew: ${fam.name}  (${fam.vehicles.length} cars)`, cx, cy + R + 34);
+      ctx.font = '500 13px system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(232,237,244,0.75)';
+      ctx.fillText('Press ENTER to choose your car', cx, cy + R + 60);
+    }
+    this.drawGauge(ctx, w, h);
   }
 
   draw(ctx, w, h) {
     if (!this.nameDone) { this.drawNameScreen(ctx, w, h); return; }
+    if (!this.wheelDone) { this.drawWheel(ctx, w, h); return; }
     this.drawBackdrop(ctx, w, h);
 
     // title
@@ -303,6 +441,12 @@ export class Garage {
     ctx.strokeText('CHOOSE YOUR VEHICLE', w / 2, 52);
     ctx.fillStyle = '#ffffff';
     ctx.fillText('CHOOSE YOUR VEHICLE', w / 2, 52);
+    if (this.drawnFamily !== null) {
+      const fam = FAMILIES[this.drawnFamily];
+      ctx.font = '700 15px system-ui, sans-serif';
+      ctx.fillStyle = fam.color;
+      ctx.fillText(`Drawn class — ${fam.name}  ·  ${fam.vehicles.length} cars`, w / 2, 80);
+    }
 
     // layout: [world map]  [list]  [preview], then the action bar
     const margin = 18, gap = 16, pad = 14;
@@ -326,6 +470,7 @@ export class Garage {
     this.drawListPanel(ctx, listX, panelTop, listW, panelH, pad);
     this.drawPreviewPanel(ctx, prevX, panelTop, prevW, panelH, pad);
     this.drawActionBar(ctx, w, panelBottom, btnH, hintH, gap);
+    this.drawGauge(ctx, w, h);
   }
 
   // ---- world map panel -----------------------------------------------------

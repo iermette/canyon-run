@@ -172,10 +172,65 @@ function paintBody(ctx, p, body, roof, stripe) {
   }
 }
 
-function drawCar(ctx, car) {
+function drawCar(ctx, car, state = {}, now = 0) {
   const p = ARCH[car.arch] || ARCH.CU;
   paintWheels(ctx, p.len, p.wid, !!p.tall);
   paintBody(ctx, p, car.body, car.roof, car.stripe);
+  drawLights(ctx, p, state, now);
+}
+
+// Brake lights, turn signals, headlight flash and NOS flames (points 2-6).
+// Local space: +x front, -x rear, +y right, -y left.
+function drawLights(ctx, p, state, now) {
+  const frontX = p.len / 2 - 3;
+  const rearX = -p.len / 2 + 3;
+  const sideY = p.wid / 2 - 2;
+  const blinkOn = Math.floor(now / 280) % 2 === 0; // ~1.8 Hz signal
+
+  // headlight flash (appel de phare) — bright white lenses at the front
+  if (state.flash) {
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.fillRect(frontX - 2, -sideY - 2, 4, 4);
+    ctx.fillRect(frontX - 2, sideY - 2, 4, 4);
+  }
+
+  // brake lights — red, at the rear, while braking (point 6)
+  if (state.braking) {
+    ctx.fillStyle = 'rgba(255,64,52,0.95)';
+    ctx.fillRect(rearX - 2, -sideY - 2, 4, 4);
+    ctx.fillRect(rearX - 2, sideY - 2, 4, 4);
+  }
+
+  // turn signals — amber, blinking; front + rear on the chosen side (point 3)
+  if (state.turnLeft && blinkOn) {
+    ctx.fillStyle = 'rgba(255,196,40,0.95)';
+    ctx.fillRect(frontX - 2, -sideY - 2, 4, 4);
+    ctx.fillRect(rearX - 2, -sideY - 2, 4, 4);
+  }
+  if (state.turnRight && blinkOn) {
+    ctx.fillStyle = 'rgba(255,196,40,0.95)';
+    ctx.fillRect(frontX - 2, sideY - 2, 4, 4);
+    ctx.fillRect(rearX - 2, sideY - 2, 4, 4);
+  }
+
+  // NOS flames — rear centre, flickering (point 2)
+  if (state.nos) {
+    const f = 0.7 + 0.3 * Math.sin(now / 30);
+    ctx.beginPath();
+    ctx.moveTo(rearX - 1, -4);
+    ctx.lineTo(rearX - 1 - 15 * f, 0);
+    ctx.lineTo(rearX - 1, 4);
+    ctx.closePath();
+    ctx.fillStyle = `rgba(255,150,40,${(0.8 * f).toFixed(3)})`;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(rearX - 1, -2.5);
+    ctx.lineTo(rearX - 1 - 9 * f, 0);
+    ctx.lineTo(rearX - 1, 2.5);
+    ctx.closePath();
+    ctx.fillStyle = `rgba(255,236,120,${(0.9 * f).toFixed(3)})`;
+    ctx.fill();
+  }
 }
 
 // ---- catalog assembly ---------------------------------------------------------
@@ -230,7 +285,7 @@ function buildVehicle(c, i) {
     stats: { maxSpeed, accel, brake, turnRate, reverseMax },
     colliders,
     wheelPts,
-    draw: (ctx) => drawCar(ctx, { arch: c.arch, body: c.body, roof: c.roof, stripe: c.stripe }),
+    draw: (ctx, state, now) => drawCar(ctx, { arch: c.arch, body: c.body, roof: c.roof, stripe: c.stripe }, state, now),
   };
 }
 
