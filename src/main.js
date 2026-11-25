@@ -62,7 +62,7 @@ net.on('lobby', (m) => {
   finishedTimes.clear();
   remotes.clear();
   bumpCooldowns.clear();
-  garage.setLobby(m.players, m.you);
+  garage.setLobby(m.players, m.you, m.family);
   garage.raceInProgress = m.phase !== 'lobby';
   if (m.phase === 'lobby') {
     // Preview the track everyone will race on. The road widens with the
@@ -74,6 +74,13 @@ net.on('lobby', (m) => {
     camera.snapTo(car.x, car.y);
     gameState.reset();
   }
+});
+
+net.on('family', (m) => {
+  // Shared family draw (point 1): the server drew ONE family for the whole room.
+  // Apply it — spins the wheel to it, locks the picker, and stops re-requesting.
+  if (phase !== 'garage' || typeof m.id !== 'number') return;
+  garage.applyFamily(m.id);
 });
 
 net.on('countdown', (m) => {
@@ -212,6 +219,7 @@ function frame(now) {
     else if (mode === 'mp' && action === 'ready') net.send({ t: 'ready', vehicleId: garage.selected.id });
     else if (mode === 'mp' && action === 'vehicle') net.send({ t: 'vehicle', vehicleId: garage.selected.id });
     else if (mode === 'mp' && action === 'start') net.send({ t: 'start' });
+    else if (mode === 'mp' && action === 'draw') net.send({ t: 'draw' });
   } else if (phase === 'countdown') {
     gameState.update(dt, world); // checkered countdown display
     if (gameState.state !== State.COUNTDOWN) phase = 'racing'; // solo GO (mp waits for the server's 'go')

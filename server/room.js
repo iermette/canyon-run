@@ -11,6 +11,7 @@ const PLAYER_COLORS = [
 
 const COUNTDOWN_MS = 5000; // must match the client's checkered countdown
 const MAX_PLAYERS = 15;
+const FAMILY_COUNT = 5; // must stay in sync with FAMILY_COUNT in src/families.js
 
 class Room {
   constructor() {
@@ -21,6 +22,10 @@ class Room {
     this.slots = new Map();   // id -> {s, off} starting grid position
     this.countdownTimer = null;
     this.nextId = 1;
+    // Shared fairness draw (point 1): one family for the whole room, visible on
+    // every screen. Drawn on the first request and kept for the session, so all
+    // players (and every round) pick from the SAME family.
+    this.family = null; // null until drawn, then 0..FAMILY_COUNT-1
   }
 
   // Road width scales with the number of connected players (the user's core
@@ -82,6 +87,21 @@ class Room {
         p.vehicleId = typeof msg.vehicleId === 'string' ? msg.vehicleId.slice(0, 32) : 'ferrari-288-gto';
         for (const q of this.players.values()) this.sendLobbyTo(q);
         break;
+
+      case 'draw': {
+        // Shared fairness draw (point 1): the server picks ONE family for the
+        // whole room and broadcasts it. Every client spins its wheel to this same
+        // result and locks its picker to this family, so all players share one
+        // category. Idempotent: once drawn, further requests just re-broadcast
+        // the same family (one draw per session, not one per player).
+        if (this.phase !== 'lobby') return;
+        if (this.family === null) this.family = Math.min(FAMILY_COUNT - 1, (Math.random() * FAMILY_COUNT) | 0);
+        this.broadcast({ t: 'family', id: this.family });
+        // Re-send the lobby so every client's roster state carries the shared
+        // family, and a late joiner inherits it on join.
+        for (const q of this.players.values()) this.sendLobbyTo(q);
+        break;
+      }
 
       case 'start':
         if (this.phase !== 'lobby') return;
@@ -189,7 +209,7 @@ class Room {
     const players = [...this.players.values()].map((q) => ({
       id: q.id, name: q.name, vehicleId: q.vehicleId, ready: q.ready, color: q.color,
     }));
-    p.ws.send(JSON.stringify({ t: 'lobby', phase: this.phase, you: p.id, players }));
+    p.ws.send(JSON.stringify({ t: 'lobby', phase: this.phase, you: p.id, family: this.family, players }));
   }
 
   broadcast(obj) {

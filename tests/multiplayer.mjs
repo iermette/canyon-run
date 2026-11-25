@@ -70,6 +70,32 @@ const C = new Client('Carol');
 await C.next((m) => m.t === 'lobby' && m.players.length === 3);
 check(Math.abs(room.widthFactor - (1 + 2 * 0.09)) < 1e-9, `road widens with players: widthFactor == ${room.widthFactor} for 3`);
 
+// ---- shared family draw (point 1) ---------------------------------------------
+// One server-authorized draw per room: every player lands on the same family,
+// the wheel is just the reveal. The server is the single source of truth.
+[A, B, C].forEach((c) => c.clear()); // drop join chatter
+A.send({ t: 'draw' });
+const famA = await A.next((m) => m.t === 'family');
+const famB = await B.next((m) => m.t === 'family');
+const famC = await C.next((m) => m.t === 'family');
+check(famA.id === famB.id && famB.id === famC.id, `all players receive the same drawn family (${famA.id})`);
+check(Number.isInteger(famA.id) && famA.id >= 0 && famA.id <= 4, `drawn family is a valid index (${famA.id})`);
+check(room.family === famA.id, `room.family holds the shared draw (${room.family})`);
+await B.next((m) => m.t === 'lobby' && m.family === famA.id);
+check(true, 'lobby payload carries the shared family');
+// Re-requesting is idempotent: the family does not change.
+A.clear(); B.clear();
+A.send({ t: 'draw' });
+const famA2 = await A.next((m) => m.t === 'family');
+check(famA2.id === famA.id, `re-requesting keeps the same family (${famA2.id})`);
+// A late joiner inherits the already-drawn family via the lobby payload.
+const D = new Client('Dave');
+const dLobby = await D.next((m) => m.t === 'lobby' && m.players.length === 4);
+check(dLobby.family === famA.id, 'late joiner inherits the shared family');
+A.clear(); // drop the stale 3-player lobby from the re-draw so we match Dave's leave
+D.close();
+await A.next((m) => m.t === 'lobby' && m.players.length === 3, 4000); // Dave left
+
 // ---- rename ---------------------------------------------------------------------
 A.send({ t: 'name', name: 'Zoe' });
 await B.next((m) => m.t === 'lobby' && m.players.find((p) => p.id === A.id)?.name === 'Zoe');

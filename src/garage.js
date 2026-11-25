@@ -86,13 +86,18 @@ export class Garage {
     this.reduceMotion = (typeof matchMedia === 'function') && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     // Fairness roulette (point 1): before the picker, a wheel draws one of the
-    // 5 speed families; only that family's cars are selectable. Re-spun on every
-    // entry to the garage via resetWheel() (main.js toGarage).
+    // 5 speed families; only that family's cars are selectable. In multiplayer the
+    // server makes ONE shared draw for the whole room (all players, one category);
+    // in solo the client draws locally. The wheel always spins to the decided
+    // family — it is the shared reveal, never the source of the choice.
     this.spin = new Roulette(FAMILIES.length);
     this.spinStarted = false;
     this.spinDone = false;
     this.wheelDone = false;
     this.drawnFamily = null; // index into FAMILIES once the wheel stops
+    this.mpDrawnFamily = null; // mp: the server-drawn family (null = not drawn yet)
+    this.mpDrawRequested = false; // mp: a {t:'draw'} request is in flight
+    this.mpDrawWait = 0; // mp: time spent waiting for the server's draw (retry clock)
 
     // Build the initial (unfiltered) list so the picker is never empty on entry.
     this.rebuild();
@@ -105,8 +110,36 @@ export class Garage {
     this.spinDone = false;
     this.wheelDone = false;
     this.drawnFamily = null;
+    this.mpDrawnFamily = null;
+    this.mpDrawRequested = false;
+    this.mpDrawWait = 0;
     this.cursor = 0;
     this.rebuild();
+  }
+
+  // mp: apply a shared family drawn by the server. Spins the wheel to that family
+  // (one draw for everyone), locks the picker to it, and stops asking for a draw.
+  applyFamily(id) {
+    this.mpDrawnFamily = id;
+    this.mpDrawRequested = false; // the shared draw arrived
+    this.mpDrawWait = 0;
+    this.spin = new Roulette(FAMILIES.length);
+    this.spinStarted = false;
+    this.spinDone = false;
+    this.wheelDone = false;
+    this.drawnFamily = null;
+    this.cursor = 0;
+    this.lastPreviewId = null;
+    this.previewT = 0;
+    this.rebuild();
+  }
+
+  // mp: request the shared draw from the server (idempotent on the server side).
+  requestDraw() {
+    if (this.mpDrawnFamily !== null) return 'family'; // already drawn
+    if (this.mpDrawRequested) return null; // already asked, waiting for the reply
+    this.mpDrawRequested = true;
+    return 'draw';
   }
 
   confirmName(name) {
@@ -117,9 +150,20 @@ export class Garage {
 
   get selected() { return this.list[this.cursor] || VEHICLES[0]; }
 
-  setLobby(players, you) {
+  setLobby(players, you, family) {
     this.players = players || [];
     this.you = you || null;
+    if (typeof family === 'number' && family >= 0 && family < FAMILIES.length
+        && this.mpDrawnFamily !== family) {
+      // A new shared draw arrived, or a late joiner inherits the room's draw.
+      // Apply it exactly once (the {t:'family'} handler does the same for
+      // members already in the room) so the picker locks and the list
+      // re-filters to that family's cars.
+      this.mpDrawnFamily = family;
+      this.mpDrawRequested = false;
+      this.mpDrawWait = 0;
+      this.rebuild();
+    }
     const me = this.players.find((p) => p.id === you);
     if (me && !me.ready) this.localReady = false; // server reset my ready flag
   }
@@ -240,8 +284,17 @@ export class Garage {
     const dt = Math.min(0.05, (now - (this._lastNow || now)) / 1000);
     this._lastNow = now;
     if (!this.spinStarted) {
+      if (this.mode === 'mp' && this.mpDrawnFamily === null) {
+        // Shared draw (point 1): the wheel does NOT decide the family in mp — it
+        // reveals the one the server draws for the whole room (single source of
+        // truth, so every player lands on the same family). Ask for it if it
+        // hasn't arrived yet, and re-ask after 2 s so nobody is stuck.
+        this.mpDrawWait += dt;
+        if (this.mpDrawWait > 2) { this.mpDrawWait = 0; this.mpDrawRequested = false; }
+        return this.requestDraw(); // 'draw' once, then null while waiting
+      }
       this.spinStarted = true;
-      this.spin.spin(pickFamilyIndex());
+      this.spin.spin(this.mode === 'mp' ? this.mpDrawnFamily : pickFamilyIndex());
     }
     const confirm = input.wasPressed('Enter') || input.wasPressed('NumpadEnter') || input.wasPressed('Space');
     if (confirm && this.spin.spinning) this.spin.t = this.spin.dur; // fast-forward this frame
